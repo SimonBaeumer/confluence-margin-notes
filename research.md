@@ -79,6 +79,11 @@ Deep dive in [appendix-text-anchoring.md](appendix-text-anchoring.md).
 - W3C `TextQuoteSelector` (the quoted text plus surrounding context) together with `TextPositionSelector` (character offsets).
 - `approx-string-match` for fuzzy re-anchoring. It is maintained. The old `dom-anchor-*` libraries are dead.
 - The **CSS Custom Highlight API** is in Firefox since 140, click hit-testing (`highlightsFromPoint`) since 150. It draws highlights without touching React's DOM, so Confluence re-renders don't wipe them.
+- **Confluence-specific anchors (verified on the live RFC page):**
+  - Every ADF block (paragraph, heading, list item, table cell) carries a stable-looking `localId`.
+  - Native inline comments are `annotation` marks on text nodes (`id = inlineMarkerRef`), so they travel with the text when the page is edited.
+  - Confluence keeps every page version, so a note's original version can be fetched and diffed against the current one.
+- Together these allow a stronger cascade than Hypothesis has on generic pages: block `localId`, then version-diff mapping, then fuzzy quote. Each step verifies the quote. Full explanation in [appendix-explain-reanchoring.md](appendix-explain-reanchoring.md).
 
 ### Firefox extension platform
 Details in [appendix-firefox-extension-platform.md](appendix-firefox-extension-platform.md).
@@ -102,9 +107,9 @@ The browser extension (option A from intake) is decided. The remaining choices a
 | 1d. Restricted page in my Confluence personal space | Medium | OK (admins can see it) | Automatic, any browser | Same auth as publishing. Notes stay inside the company boundary |
 | 1e. Confluence content properties on each page | Low | **Bad** (anyone with page access can read them) | Automatic | Ruled out for private notes |
 
-**Recommendation:**
-- **v1:** use 1a, behind a small `NoteStore` interface.
-- **v2:** add a sync backend, where 1d (personal-space page) and 1c (GitHub) are the candidates. Prefer 1d if work notes must stay within company systems.
+**Decision (confirmed by the user):**
+- **v1:** 1a, behind a small `NoteStore` interface.
+- **v2:** 1d, a restricted page in my Confluence personal space. It uses the same auth as publishing and keeps notes inside the company boundary.
 - Design the data model as a sync-friendly append log (ids, `updatedAt`, tombstones) from day one, so v2 doesn't need a migration.
 
 ### Decision 2: Publish path (auth)
@@ -143,6 +148,16 @@ private  ──(mark as draft)──▶  draft  ──(publish / submit review)�
 - **Discard review** turns drafts back into private notes (it does not delete them).
 - **Promote** on a single note publishes it immediately, with or without a review.
 
+### Decision 4b: Staying on the right text across page versions
+
+| Option | Robustness | Effort |
+|---|---|---|
+| 4b-1. Quote + position only (Hypothesis style) | Good on small edits, risk of wrong match on repeated terms | Low |
+| **4b-2. Layered cascade: block `localId`, then version-diff mapping, then fuzzy quote, every step verifying the quote** | Best. Uses Confluence's own stable IDs and version history | Medium |
+| 4b-3. Store a full page snapshot per note and diff locally | Robust without the API, heavy storage | Medium |
+
+**Recommendation:** 4b-2. Re-anchored notes are rebased onto the current version, and their state is shown visibly (anchored, moved, changed, orphaned). Publishing has a strict gate: re-anchor against freshly fetched ADF right before each POST, and only anchored or moved notes publish without confirmation. Once a note is published, Confluence's own annotation mark takes over anchoring. See [appendix-explain-reanchoring.md](appendix-explain-reanchoring.md).
+
 ### Decision 5: UI surfaces
 
 | Surface | Use |
@@ -176,13 +191,17 @@ Items that **block the spec** can be answered by a short spike on the real tenan
 3. **(Spike)** Does creating an inline comment bump the page version? Does the response include `inlineMarkerRef`?
 4. **(Spike)** Does the highlight's `data-id` on the page equal the `inlineMarkerRef`? That would let us link published notes to native highlights.
 5. **(Spike)** In edit mode and on Live Docs, can we capture notes at all, or is v1 view-mode only?
-6. **(Decide)** Minimum Firefox version: 146 (underlined highlights) or 150 (click a highlight to open its note)? What version runs on your machines?
-7. **(Decide)** Should the v2 sync backend be the personal Confluence space page (1d) or GitHub (1c)? This doesn't block v1.
-8. **(Decide)** UI wording: "Review" or "Draft comments"? "Review" collides with Confluence page-approval apps, which is minor for a personal tool.
+6. **(Spike)** Do block `localId`s survive edits inside the block, moves, and paragraph-to-list conversions? Does `GET /pages/{id}?version=N` return old ADF bodies?
+7. **(Decide)** UI wording: "Review" or "Draft comments"? "Review" collides with Confluence page-approval apps, which is minor for a personal tool.
+
+Resolved:
+- Minimum Firefox version: **150** (the user runs 150). This enables click-on-highlight via `highlightsFromPoint`.
+- v2 sync backend: **Confluence personal-space page** (option 1d).
 
 ## Sources
 
 - [appendix-live-site-validation.md](appendix-live-site-validation.md): read-only Rovo MCP check of a real RFC page.
+- [appendix-explain-reanchoring.md](appendix-explain-reanchoring.md): page ADF (`localId`s, annotation marks) read via Rovo MCP `getConfluencePage`.
 - [appendix-confluence-inline-comments-api.md](appendix-confluence-inline-comments-api.md): Atlassian REST v2 spec, `@atlaskit/renderer` source, a public Confluence page DOM.
 - [appendix-text-anchoring.md](appendix-text-anchoring.md): W3C Web Annotation model, the hypothesis/client source, MDN for the Custom Highlight API.
 - [appendix-firefox-extension-platform.md](appendix-firefox-extension-platform.md): MDN, Extension Workshop, WXT docs.
