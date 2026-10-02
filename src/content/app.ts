@@ -8,16 +8,31 @@ import { SCHEMA_VERSION, nowIso, type AdfDoc, type Note, type PageRef } from '..
 import { plainToAdf } from '../core/rich-text';
 import { isNoteKey, isSessionKey, NoteStore } from '../core/store';
 import { ConfluenceClient } from '../confluence/client';
-import { DomMapper, findRoot, readPageMeta, type PageMeta } from '../confluence/dom';
+import { DomMapper, findCommentMark, findRoot, readPageMeta, type PageMeta } from '../confluence/dom';
 import { gateFor, indexForVersion, publishNote, submitDrafts, type PublishHooks } from '../confluence/publish';
 import { Highlighter, type Painted } from './highlights';
 import { Overlay, type DialogItem, type SubmitDialog } from './overlay';
 
 const POLL_MS = 700;
 const MUTATION_DEBOUNCE_MS = 350;
+const JUMP_ATTEMPTS = 12;
+const JUMP_RETRY_MS = 250;
 
 function uuid(): string {
   return crypto.randomUUID();
+}
+
+/** Resolves once `read` returns the same value for a few frames (or after 1.5 s). */
+async function settled(read: () => number | undefined): Promise<void> {
+  const deadline = Date.now() + 1500;
+  let last = read();
+  let still = 0;
+  while (still < 4 && Date.now() < deadline) {
+    await new Promise((r) => requestAnimationFrame(r));
+    const now = read();
+    still = now === last ? still + 1 : 0;
+    last = now;
+  }
 }
 
 function statusText(note: Note, r: AnchorResult | undefined): string | null {
@@ -141,6 +156,8 @@ export class App {
       this.rebuildMapper();
       await this.refreshNotes();
     } catch (e) {
+      // A load the page has moved on from must not report into the next one.
+      if (this.meta !== meta) return;
       this.unavailable = `Could not load the page text: ${(e as Error).message}`;
       console.warn('[margin-notes]', e);
     }
@@ -171,26 +188,30 @@ export class App {
   private async refreshNotes(): Promise<void> {
     if (!this.pageRef || !this.index || this.indexVersion === null) return;
     const pageKey = this.pageRef.key;
+    const index = this.index;
+    const version = this.indexVersion;
+    // A reset or reload replaces the index while we await: stop then, the new load refreshes again.
+    const stale = () => this.index !== index;
     const notes = await this.store.notesForPage(pageKey);
-    if (this.pageRef?.key !== pageKey) return;
+    if (stale()) return;
     this.notes = notes;
     for (const n of notes) {
       if (n.state === 'published') continue;
-      await this.anchorNote(n);
+      await this.anchorNote(n, index, version);
+      if (stale()) return;
     }
     this.paint();
     this.updateBanner();
   }
 
   /** Re-anchors a note and saves it when its target or status changed. */
-  private async anchorNote(n: Note): Promise<void> {
-    const index = this.index!;
-    const version = this.indexVersion!;
+  private async anchorNote(n: Note, index: PageTextIndex, version: number): Promise<void> {
     let r = anchor(n.target, index, version);
     if ((r.status === 'orphaned' || r.status === 'ambiguous') && n.target.pageVersion !== version && n.page.pageId) {
       const old = await indexForVersion(this.client, n.page.pageId, n.target.pageVersion);
       r = anchor(n.target, index, version, old);
     }
+    if (this.index !== index) return;
     this.results.set(n.id, r);
     const patch: Partial<Note> = {};
     const displayStatus = r.status === 'anchored' && n.target.exact !== n.target.originalExact ? 'changed' : r.status;
@@ -354,13 +375,58 @@ export class App {
     });
   }
 
-  private scrollTo(id: string): void {
+  /** Confluence's highlight of a published note, if it is on this page. */
+  private commentMark(id: string): HTMLElement | null {
+    const ref = this.notes.find((n) => n.id === id)?.published?.inlineMarkerRef;
+    const root = findRoot();
+    return ref && root ? findCommentMark(root, ref) : null;
+  }
+
+  private scrollTo(id: string): boolean {
+    const mark = this.commentMark(id);
+    if (mark) {
+      mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return true;
+    }
     const ranges = this.highlighter.rangesFor(id);
     const first = ranges[0];
-    if (!first) return;
+    if (!first) return false;
     const el = first.startContainer.parentElement;
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     this.highlighter.flash(id);
+    return true;
+  }
+
+  /**
+   * Scrolls to a note and opens it. Confluence renders long pages
+   * progressively, so a note further down may have no DOM yet: scroll to the
+   * end of what is rendered and look again.
+   */
+  async jumpTo(id: string): Promise<boolean> {
+    for (let attempt = 0; attempt < JUMP_ATTEMPTS; attempt++) {
+      if (this.scrollTo(id)) {
+        const rect = () => (this.commentMark(id) ?? this.highlighter.rangesFor(id)[0])?.getBoundingClientRect();
+        // Popovers are placed from the target's position, so wait for the scroll to end. Content
+        // rendered above the target can still push it out of view meanwhile: scroll again then.
+        for (let i = 0; i < 4; i++) {
+          await settled(() => rect()?.top);
+          const r = rect();
+          if (!r || (r.top >= 0 && r.bottom <= window.innerHeight)) break;
+          this.scrollTo(id);
+        }
+        // Clicking Confluence's highlight opens its comment thread.
+        const mark = this.commentMark(id);
+        if (mark) mark.click();
+        else this.openNote(id);
+        return true;
+      }
+      const rendered = findRoot()?.querySelectorAll('[data-renderer-start-pos]');
+      rendered?.[rendered.length - 1]?.scrollIntoView({ block: 'end' });
+      await new Promise((r) => setTimeout(r, JUMP_RETRY_MS));
+      this.rebuildMapper();
+      this.paint();
+    }
+    return false;
   }
 
   private async reattach(id: string): Promise<string | null> {
@@ -520,6 +586,9 @@ export class App {
         this.scrollTo(msg.noteId);
         setTimeout(() => this.openNote(msg.noteId), 450);
         return true;
+      case 'jump-to':
+        await this.loading;
+        return await this.jumpTo(msg.noteId);
       case 'open-submit':
         await this.openSubmit();
         return true;

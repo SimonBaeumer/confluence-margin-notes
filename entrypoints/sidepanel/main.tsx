@@ -30,6 +30,13 @@ async function toTab<T>(msg: ToContent): Promise<T | null> {
   }
 }
 
+/** Opens a URL in the target tab, or a new tab when there is none. */
+async function openInTab(url: string): Promise<void> {
+  const id = await targetTabId();
+  if (id !== null) await browser.tabs.update(id, { url });
+  else await browser.tabs.create({ url });
+}
+
 type Filter = 'all' | NoteState | 'attention';
 type View = 'page' | 'all' | 'settings';
 
@@ -126,6 +133,14 @@ function NoteCard({ note, onPage }: { note: Note; onPage: boolean }) {
     const r = await toTab<{ error: string | null }>({ type: 'reattach', noteId: note.id });
     setMsg(r?.error ?? null);
   };
+  const commentUrl = note.published?.webUrl ? new URL(note.published.webUrl, `https://${note.page.site}`).href : null;
+  const jump = async () => {
+    setMsg(null);
+    if (await toTab<boolean>({ type: 'jump-to', noteId: note.id })) return;
+    // Not on the page (anymore): open the comment's own URL in the same tab.
+    if (commentUrl) await openInTab(commentUrl);
+    else setMsg('Could not find this note on the page.');
+  };
   const changed = note.state !== 'published' && note.target.exact !== note.target.originalExact;
   const lost = note.anchorStatus === 'orphaned' || note.anchorStatus === 'ambiguous';
   const publishBlocked = !note.publishable || lost;
@@ -138,7 +153,7 @@ function NoteCard({ note, onPage }: { note: Note; onPage: boolean }) {
         <span class="spacer" />
         {note.state !== 'published' && <span class={`chip ${NEEDS_ATTENTION.has(note.anchorStatus) ? 'warn' : 'ok'}`}>{note.anchorStatus}</span>}
       </header>
-      <button class="quote" title="Show on page" disabled={!onPage} onClick={() => void toTab({ type: 'scroll-to', noteId: note.id })}>
+      <button class="quote" title="Show on page" disabled={!onPage} onClick={() => void jump()}>
         “{note.target.exact.length > 200 ? note.target.exact.slice(0, 199) + '…' : note.target.exact}”
       </button>
       {changed && <div class="hint warn">Was: “{note.target.originalExact.slice(0, 160)}”</div>}
@@ -154,13 +169,24 @@ function NoteCard({ note, onPage }: { note: Note; onPage: boolean }) {
       {!editing && (
         <div class="actions">
           {note.state === 'published' ? (
-            note.published?.webUrl && (
-              <a class="b" href={note.published.webUrl} target="_blank" rel="noreferrer">
-                Open comment
-              </a>
+            onPage ? (
+              <button class="b" title="Scroll to the comment and open it" onClick={() => void jump()}>
+                Jump to comment
+              </button>
+            ) : (
+              commentUrl && (
+                <button class="b" onClick={() => void openInTab(commentUrl)}>
+                  Open comment
+                </button>
+              )
             )
           ) : (
             <>
+              {onPage && (
+                <button class="b" title="Scroll to the note and open it" onClick={() => void jump()}>
+                  Jump to
+                </button>
+              )}
               <button class="b" onClick={() => setEditing(true)}>
                 Edit
               </button>
@@ -273,7 +299,7 @@ function PageView({ info, notes, sessions }: { info: PageInfo | null; notes: Not
   );
 }
 
-function AllView({ notes }: { notes: Note[] }) {
+function AllView({ notes, currentKey }: { notes: Note[]; currentKey: string | null }) {
   const [q, setQ] = useState('');
   const groups = useMemo(() => {
     const m = new Map<string, Note[]>();
@@ -285,11 +311,6 @@ function AllView({ notes }: { notes: Note[] }) {
     }
     return [...m.values()].sort((a, b) => Math.max(...b.map((n) => Date.parse(n.updatedAt))) - Math.max(...a.map((n) => Date.parse(n.updatedAt))));
   }, [notes, q]);
-  const open = async (url: string) => {
-    const id = await targetTabId();
-    if (id !== null) await browser.tabs.update(id, { url });
-    else await browser.tabs.create({ url });
-  };
   return (
     <>
       <input class="search" type="search" placeholder="Search all notes" value={q} onInput={(e) => setQ((e.target as HTMLInputElement).value)} />
@@ -298,14 +319,18 @@ function AllView({ notes }: { notes: Note[] }) {
         const p = g[0]!.page;
         return (
           <section class="group">
-            <button class="page-link" onClick={() => void open(p.url)} title={p.url}>
+            <button class="page-link" onClick={() => void openInTab(p.url)} title={p.url}>
               {p.title || p.url}
             </button>
             <ul>
               {g
                 .sort((a, b) => a.target.start - b.target.start)
                 .map((n) => (
-                  <li>
+                  <li
+                    class="jump"
+                    title={n.page.key === currentKey ? 'Jump to this note' : 'Open the page'}
+                    onClick={() => void (n.page.key === currentKey ? toTab({ type: 'jump-to', noteId: n.id }) : openInTab(p.url))}
+                  >
                     <span class={`dot ${n.state}`} title={STATE_LABEL[n.state]} />
                     <span class="q">“{n.target.exact.slice(0, 80)}”</span>
                     {needsAttention(n) && <span class="chip warn">{n.anchorStatus}</span>}
@@ -405,7 +430,7 @@ function App() {
       </nav>
       <main>
         {view === 'page' && <PageView info={info} notes={notes} sessions={sessions} />}
-        {view === 'all' && <AllView notes={notes} />}
+        {view === 'all' && <AllView notes={notes} currentKey={info?.page?.key ?? null} />}
         {view === 'settings' && <SettingsView />}
       </main>
     </div>

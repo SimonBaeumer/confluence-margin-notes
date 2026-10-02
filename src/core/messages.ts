@@ -7,6 +7,8 @@ export type ToContent =
   | { type: 'get-page' }
   | { type: 'scroll-to'; noteId: string }
   | { type: 'edit-note'; noteId: string }
+  /** Scrolls to a note and opens it: our popover, or Confluence's thread once published. Answers whether it was found. */
+  | { type: 'jump-to'; noteId: string }
   | { type: 'open-submit' }
   | { type: 'publish-now'; noteId: string }
   | { type: 'reattach'; noteId: string };

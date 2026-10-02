@@ -47,7 +47,7 @@ npm run build        # .output/firefox-mv3
 npm run lint:ext     # web-ext lint (what AMO runs when signing)
 ```
 
-`npm run build:e2e` builds a test variant: the in-page UI uses an open shadow root, and two DOM events are available for browser automation (`mn-e2e-debug` writes the content script state to `document.documentElement.dataset.mnDebug`, `mn-e2e-open-sidebar` opens the sidebar page in a tab pinned to the current tab).
+`npm run build:e2e` builds a test variant: the in-page UI uses an open shadow root, and three DOM events are available for browser automation (`mn-e2e-debug` writes the content script state to `document.documentElement.dataset.mnDebug`, `mn-e2e-open-sidebar` opens the sidebar page in a tab pinned to the current tab, `mn-e2e-jump` jumps to the note id in `data-mn-jump` and writes the result to `data-mn-jump-result`).
 
 ### Layout
 
