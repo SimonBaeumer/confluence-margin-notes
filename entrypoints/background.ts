@@ -3,6 +3,8 @@
 
 import type { ToBackground, ToContent } from '../src/core/messages';
 
+declare const __E2E__: boolean;
+
 const MENU_ID = 'margin-notes-add';
 
 async function sendToTab(tabId: number | undefined, msg: ToContent): Promise<void> {
@@ -39,8 +41,12 @@ export default defineBackground(() => {
     void (browser as any).sidebarAction?.toggle?.();
   });
 
-  browser.runtime.onMessage.addListener((msg: ToBackground, sender) => {
+  browser.runtime.onMessage.addListener((msg: ToBackground | { type: 'e2e-open-sidebar' }, sender) => {
     if (sender.id !== browser.runtime.id) return;
+    if (__E2E__ && msg.type === 'e2e-open-sidebar' && sender.tab?.id !== undefined) {
+      void browser.tabs.create({ url: browser.runtime.getURL('/sidepanel.html') + '?tab=' + sender.tab.id });
+      return;
+    }
     if (msg.type === 'badge' && sender.tab?.id !== undefined) {
       const tabId = sender.tab.id;
       void browser.action.setBadgeText({ tabId, text: msg.count > 0 ? String(msg.count) : '' });

@@ -1,0 +1,288 @@
+{
+  "adf": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph"
+      },
+      {
+        "type": "extension",
+        "attrs": {
+          "layout": "default",
+          "extensionType": "com.atlassian.confluence.macro.core",
+          "extensionKey": "toc",
+          "parameters": {
+            "macroParams": {},
+            "macroMetadata": {
+              "macroId": {
+                "value": "6e590f87-8668-4aba-b2e5-b014bef9dbf4"
+              },
+              "schemaVersion": {
+                "value": "1"
+              },
+              "title": "Table of Contents"
+            }
+          },
+          "localId": "5dce80e8-8a57-469a-b89b-98692297f52c"
+        }
+      },
+      {
+        "type": "paragraph"
+      },
+      {
+        "type": "heading",
+        "attrs": {
+          "level": 1
+        },
+        "content": [
+          {
+            "text": "User mention cannot be added",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "heading",
+        "attrs": {
+          "level": 2
+        },
+        "content": [
+          {
+            "text": "Symptoms",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "text": "Ability to address comment to someone using the @sign is missing.",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "heading",
+        "attrs": {
+          "level": 2
+        },
+        "content": [
+          {
+            "text": "Cause",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "text": "There are some limitations of Confluence API.",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "heading",
+        "attrs": {
+          "level": 2
+        },
+        "content": [
+          {
+            "text": "Resolution",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "text": "Unfortunately, this feature is not available in the app. Implementation of such a function has some unwanted side effects due to limitation of Confluence API.",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "heading",
+        "attrs": {
+          "level": 1
+        },
+        "content": [
+          {
+            "text": "Comment cannot be added to unsaved content",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "heading",
+        "attrs": {
+          "level": 2
+        },
+        "content": [
+          {
+            "text": "Symptoms",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "text": "It is not possible to add comment to just added and unsaved content.",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "heading",
+        "attrs": {
+          "level": 2
+        },
+        "content": [
+          {
+            "text": "Cause",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "text": "We use standard REST to create/edit inline comments, created by Atlassian. The mechanism of inline comments creation is following: the phrase that we have selected is searched for in the content of the page, but since the content is new, then in fact it is not existing in Confluence and therefore an error appears.",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "heading",
+        "attrs": {
+          "level": 2
+        },
+        "content": [
+          {
+            "text": "Resolution",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "text": "Unfortunately, this feature is not available in the app. You can save the content first, after that comment adding will be available for the content.",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "heading",
+        "attrs": {
+          "level": 1
+        },
+        "content": [
+          {
+            "text": "Collaborative mode limitations",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "heading",
+        "attrs": {
+          "level": 2
+        },
+        "content": [
+          {
+            "text": "Symptoms",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "orderedList",
+        "attrs": {
+          "order": 1
+        },
+        "content": [
+          {
+            "type": "listItem",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "text": "In collaborative mode (editing a page with a colleague in parallel), if a user opens inline comments by clicking on Show comments button, other users who are working on the page at the same time see comments highlights as well.",
+                    "type": "text"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "listItem",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "text": "If a user scrolls through the page in collaborative mode, where inline comments are added, inline comments reserve place on the right side, so text layout in edit mode is changed.",
+                    "type": "text"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "heading",
+        "attrs": {
+          "level": 2
+        },
+        "content": [
+          {
+            "text": "Cause",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "text": "We work with standard Atlassian collaborative mode. It relates to editor limitations. In edit mode any changes are visible to everyone.",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "heading",
+        "attrs": {
+          "level": 2
+        },
+        "content": [
+          {
+            "text": "Resolution",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "text": "Unfortunately, this behavior occurs in the collaborative mode and there are technical limitations related to the Atlassian editor. Since the problem requires a comprehensive approach, unfortunately, we cannot give a time estimate for fix.",
+            "type": "text"
+          }
+        ]
+      }
+    ],
+    "version": 1
+  },
+  "html": "<div class=\"ak-renderer-document\"><p data-renderer-start-pos=\"1\">&nbsp;</p><div class=\"ak-renderer-extension   \" data-layout=\"default\" data-local-id=\"5dce80e8-8a57-469a-b89b-98692297f52c\" data-testid=\"extension--wrapper\" data-node-type=\"extension\" data-top-level=\"true\"><div class=\"ak-renderer-extension-inner-wrapper ak-renderer-extension-overflow-container css-v54qrt\"><!-- data-loadable-begin=\"legacy-macro-container-6e590f87-8668-4aba-b2e5-b014bef9dbf4\" --><!-- data-loadable-end=\"legacy-macro-container-6e590f87-8668-4aba-b2e5-b014bef9dbf4\" --><div title=\"Macro (toc)\" data-fabric-macro=\"6e590f87-8668-4aba-b2e5-b014bef9dbf4\" data-macro-body=\"true\" data-macro-parameters=\"{}\" data-testid=\"printable-wrapper\" data-vc=\"printable-toc-wrapper\" class=\"_4bt5LAIZbP _2WAcuGIZbP _1Qs34tdnbC _36Gbs7dnbC\" data-ssr-placeholder-replace=\"6e590f87-8668-4aba-b2e5-b014bef9dbf4\"><div class=\"macro-core toc-macro conf-macro output-block\" data-headerelements=\"H1,H2,H3,H4,H5,H6\" data-hasbody=\"false\" data-macro-name=\"toc\" data-macro-id=\"6e590f87-8668-4aba-b2e5-b014bef9dbf4\" data-vc=\"toc\" data-ssr-placeholder-replace=\"toc-6e590f87-8668-4aba-b2e5-b014bef9dbf4\"><ul data-testid=\"list-style-toc-level-container\"><li data-testid=\"list-style-toc-item-container\" style=\"--_1vjxhb3: default;\" class=\"_1LMyvKL7Tp\"><span class=\"toc-item-body\" data-outline=\"1\"><span class=\"_2sNsIg20Hp _3iDTPbYbGa\">1 </span><a href=\"#User-mention-cannot-be-added\" data-testid=\"toc-item-body\" class=\"_2sNsIg20Hp toc-link\">User mention cannot be added</a></span><ul data-testid=\"list-style-toc-level-container\"><li data-testid=\"list-style-toc-item-container\" style=\"--_1vjxhb3: default;\" class=\"_1LMyvKL7Tp\"><span class=\"toc-item-body\" data-outline=\"1.1\"><span class=\"_2sNsIg20Hp _3iDTPbYbGa\">1.1 </span><a href=\"#Symptoms\" data-testid=\"toc-item-body\" class=\"_2sNsIg20Hp toc-link\">Symptoms</a></span></li><li data-testid=\"list-style-toc-item-container\" style=\"--_1vjxhb3: default;\" class=\"_1LMyvKL7Tp\"><span class=\"toc-item-body\" data-outline=\"1.2\"><span class=\"_2sNsIg20Hp _3iDTPbYbGa\">1.2 </span><a href=\"#Cause\" data-testid=\"toc-item-body\" class=\"_2sNsIg20Hp toc-link\">Cause</a></span></li><li data-testid=\"list-style-toc-item-container\" style=\"--_1vjxhb3: default;\" class=\"_1LMyvKL7Tp\"><span class=\"toc-item-body\" data-outline=\"1.3\"><span class=\"_2sNsIg20Hp _3iDTPbYbGa\">1.3 </span><a href=\"#Resolution\" data-testid=\"toc-item-body\" class=\"_2sNsIg20Hp toc-link\">Resolution</a></span></li></ul></li><li data-testid=\"list-style-toc-item-container\" style=\"--_1vjxhb3: default;\" class=\"_1LMyvKL7Tp\"><span class=\"toc-item-body\" data-outline=\"2\"><span class=\"_2sNsIg20Hp _3iDTPbYbGa\">2 </span><a href=\"#Comment-cannot-be-added-to-unsaved-content\" data-testid=\"toc-item-body\" class=\"_2sNsIg20Hp toc-link\">Comment cannot be added to unsaved content</a></span><ul data-testid=\"list-style-toc-level-container\"><li data-testid=\"list-style-toc-item-container\" style=\"--_1vjxhb3: default;\" class=\"_1LMyvKL7Tp\"><span class=\"toc-item-body\" data-outline=\"2.1\"><span class=\"_2sNsIg20Hp _3iDTPbYbGa\">2.1 </span><a href=\"#Symptoms.1\" data-testid=\"toc-item-body\" class=\"_2sNsIg20Hp toc-link\">Symptoms</a></span></li><li data-testid=\"list-style-toc-item-container\" style=\"--_1vjxhb3: default;\" class=\"_1LMyvKL7Tp\"><span class=\"toc-item-body\" data-outline=\"2.2\"><span class=\"_2sNsIg20Hp _3iDTPbYbGa\">2.2 </span><a href=\"#Cause.1\" data-testid=\"toc-item-body\" class=\"_2sNsIg20Hp toc-link\">Cause</a></span></li><li data-testid=\"list-style-toc-item-container\" style=\"--_1vjxhb3: default;\" class=\"_1LMyvKL7Tp\"><span class=\"toc-item-body\" data-outline=\"2.3\"><span class=\"_2sNsIg20Hp _3iDTPbYbGa\">2.3 </span><a href=\"#Resolution.1\" data-testid=\"toc-item-body\" class=\"_2sNsIg20Hp toc-link\">Resolution</a></span></li></ul></li><li data-testid=\"list-style-toc-item-container\" style=\"--_1vjxhb3: default;\" class=\"_1LMyvKL7Tp\"><span class=\"toc-item-body\" data-outline=\"3\"><span class=\"_2sNsIg20Hp _3iDTPbYbGa\">3 </span><a href=\"#Collaborative-mode-limitations\" data-testid=\"toc-item-body\" class=\"_2sNsIg20Hp toc-link\">Collaborative mode limitations</a></span><ul data-testid=\"list-style-toc-level-container\"><li data-testid=\"list-style-toc-item-container\" style=\"--_1vjxhb3: default;\" class=\"_1LMyvKL7Tp\"><span class=\"toc-item-body\" data-outline=\"3.1\"><span class=\"_2sNsIg20Hp _3iDTPbYbGa\">3.1 </span><a href=\"#Symptoms.2\" data-testid=\"toc-item-body\" class=\"_2sNsIg20Hp toc-link\">Symptoms</a></span></li><li data-testid=\"list-style-toc-item-container\" style=\"--_1vjxhb3: default;\" class=\"_1LMyvKL7Tp\"><span class=\"toc-item-body\" data-outline=\"3.2\"><span class=\"_2sNsIg20Hp _3iDTPbYbGa\">3.2 </span><a href=\"#Cause.2\" data-testid=\"toc-item-body\" class=\"_2sNsIg20Hp toc-link\">Cause</a></span></li><li data-testid=\"list-style-toc-item-container\" style=\"--_1vjxhb3: default;\" class=\"_1LMyvKL7Tp\"><span class=\"toc-item-body\" data-outline=\"3.3\"><span class=\"_2sNsIg20Hp _3iDTPbYbGa\">3.3 </span><a href=\"#Resolution.2\" data-testid=\"toc-item-body\" class=\"_2sNsIg20Hp toc-link\">Resolution</a></span></li></ul></li></ul></div><div hidden=\"\" aria-hidden=\"true\" data-testid=\"toc-included-content-subscribers\"></div></div></div></div><p data-renderer-start-pos=\"4\">&nbsp;</p><div class=\"_3iDTPbvLZJ renderer-heading-wrapper\" data-testid=\"renderer-heading-wrapper\" data-level=\"1\"><h1 data-renderer-start-pos=\"6\" tabindex=\"-1\" id=\"User-mention-cannot-be-added\">User mention cannot be added</h1><span role=\"presentation\" class=\"heading-anchor-wrapper css-0\"><button data-testid=\"anchor-button\" id=\"ba4d0c98-8adb-4f51-bf86-53cd79c17c60\" aria-hidden=\"false\" tabindex=\"0\" aria-label=\"Copy link to\" aria-labelledby=\"ba4d0c98-8adb-4f51-bf86-53cd79c17c60 User-mention-cannot-be-added\" type=\"button\" class=\"css-x4slh0\"><span role=\"img\" aria-label=\"Copy\" style=\"color: var(--ds-icon-subtle, #505258);\" class=\"_3iDTPbvbI6 _24h04i2Njc _3YEZNOdnbC _26BoRw7dHp _03SyCPU7Rg _0LQT5ECyim _2z3AMPTxK4 _1hdADdMFyn\"><svg fill=\"none\" viewBox=\"0 0 16 16\" role=\"presentation\" class=\"_4bt5LAnQyn _2WAcuGnQyn _1UtDYz98eZ _1pp6NdYbGa _1RrJLiUWqv _24fbFs98eZ _39xV025zaO _0jFU0V5zaO\"><path fill=\"currentcolor\" fill-rule=\"evenodd\" d=\"M8.22 2.22a3.932 3.932 0 1 1 5.56 5.56l-2.25 2.25-1.06-1.06 2.25-2.25a2.432 2.432 0 0 0-3.44-3.44L7.03 5.53 5.97 4.47zm3.06 3.56-5.5 5.5-1.06-1.06 5.5-5.5zM2.22 8.22l2.25-2.25 1.06 1.06-2.25 2.25a2.432 2.432 0 0 0 3.44 3.44l2.25-2.25 1.06 1.06-2.25 2.25a3.932 3.932 0 1 1-5.56-5.56\" clip-rule=\"evenodd\"></path></svg></span></button></span></div><div class=\"_3iDTPbvLZJ renderer-heading-wrapper\" data-testid=\"renderer-heading-wrapper\" data-level=\"2\"><h2 data-renderer-start-pos=\"36\" tabindex=\"-1\" id=\"Symptoms\">Symptoms</h2><span role=\"presentation\" class=\"heading-anchor-wrapper css-0\"><button data-testid=\"anchor-button\" id=\"d2ea9dbf-eba1-412b-a0c4-af794d647296\" aria-hidden=\"false\" tabindex=\"0\" aria-label=\"Copy link to\" aria-labelledby=\"d2ea9dbf-eba1-412b-a0c4-af794d647296 Symptoms\" type=\"button\" class=\"css-x4slh0\"><span role=\"img\" aria-label=\"Copy\" style=\"color: var(--ds-icon-subtle, #505258);\" class=\"_3iDTPbvbI6 _24h04i2Njc _3YEZNOdnbC _26BoRw7dHp _03SyCPU7Rg _0LQT5ECyim _2z3AMPTxK4 _1hdADdMFyn\"><svg fill=\"none\" viewBox=\"0 0 16 16\" role=\"presentation\" class=\"_4bt5LAnQyn _2WAcuGnQyn _1UtDYz98eZ _1pp6NdYbGa _1RrJLiUWqv _24fbFs98eZ _39xV025zaO _0jFU0V5zaO\"><path fill=\"currentcolor\" fill-rule=\"evenodd\" d=\"M8.22 2.22a3.932 3.932 0 1 1 5.56 5.56l-2.25 2.25-1.06-1.06 2.25-2.25a2.432 2.432 0 0 0-3.44-3.44L7.03 5.53 5.97 4.47zm3.06 3.56-5.5 5.5-1.06-1.06 5.5-5.5zM2.22 8.22l2.25-2.25 1.06 1.06-2.25 2.25a2.432 2.432 0 0 0 3.44 3.44l2.25-2.25 1.06 1.06-2.25 2.25a3.932 3.932 0 1 1-5.56-5.56\" clip-rule=\"evenodd\"></path></svg></span></button></span></div><p data-renderer-start-pos=\"46\">Ability to address comment to someone using the @sign is missing.</p><div class=\"_3iDTPbvLZJ renderer-heading-wrapper\" data-testid=\"renderer-heading-wrapper\" data-level=\"2\"><h2 data-renderer-start-pos=\"113\" tabindex=\"-1\" id=\"Cause\">Cause</h2><span role=\"presentation\" class=\"heading-anchor-wrapper css-0\"><button data-testid=\"anchor-button\" id=\"3a75424e-a709-4029-ba6d-f669cdf7f2b4\" aria-hidden=\"false\" tabindex=\"0\" aria-label=\"Copy link to\" aria-labelledby=\"3a75424e-a709-4029-ba6d-f669cdf7f2b4 Cause\" type=\"button\" class=\"css-x4slh0\"><span role=\"img\" aria-label=\"Copy\" style=\"color: var(--ds-icon-subtle, #505258);\" class=\"_3iDTPbvbI6 _24h04i2Njc _3YEZNOdnbC _26BoRw7dHp _03SyCPU7Rg _0LQT5ECyim _2z3AMPTxK4 _1hdADdMFyn\"><svg fill=\"none\" viewBox=\"0 0 16 16\" role=\"presentation\" class=\"_4bt5LAnQyn _2WAcuGnQyn _1UtDYz98eZ _1pp6NdYbGa _1RrJLiUWqv _24fbFs98eZ _39xV025zaO _0jFU0V5zaO\"><path fill=\"currentcolor\" fill-rule=\"evenodd\" d=\"M8.22 2.22a3.932 3.932 0 1 1 5.56 5.56l-2.25 2.25-1.06-1.06 2.25-2.25a2.432 2.432 0 0 0-3.44-3.44L7.03 5.53 5.97 4.47zm3.06 3.56-5.5 5.5-1.06-1.06 5.5-5.5zM2.22 8.22l2.25-2.25 1.06 1.06-2.25 2.25a2.432 2.432 0 0 0 3.44 3.44l2.25-2.25 1.06 1.06-2.25 2.25a3.932 3.932 0 1 1-5.56-5.56\" clip-rule=\"evenodd\"></path></svg></span></button></span></div><p data-renderer-start-pos=\"120\">There are some limitations of Confluence API.</p><div class=\"_3iDTPbvLZJ renderer-heading-wrapper\" data-testid=\"renderer-heading-wrapper\" data-level=\"2\"><h2 data-renderer-start-pos=\"167\" tabindex=\"-1\" id=\"Resolution\">Resolution</h2><span role=\"presentation\" class=\"heading-anchor-wrapper css-0\"><button data-testid=\"anchor-button\" id=\"a4499266-6a43-4d69-a9dc-d61d000ccfcb\" aria-hidden=\"false\" tabindex=\"0\" aria-label=\"Copy link to\" aria-labelledby=\"a4499266-6a43-4d69-a9dc-d61d000ccfcb Resolution\" type=\"button\" class=\"css-x4slh0\"><span role=\"img\" aria-label=\"Copy\" style=\"color: var(--ds-icon-subtle, #505258);\" class=\"_3iDTPbvbI6 _24h04i2Njc _3YEZNOdnbC _26BoRw7dHp _03SyCPU7Rg _0LQT5ECyim _2z3AMPTxK4 _1hdADdMFyn\"><svg fill=\"none\" viewBox=\"0 0 16 16\" role=\"presentation\" class=\"_4bt5LAnQyn _2WAcuGnQyn _1UtDYz98eZ _1pp6NdYbGa _1RrJLiUWqv _24fbFs98eZ _39xV025zaO _0jFU0V5zaO\"><path fill=\"currentcolor\" fill-rule=\"evenodd\" d=\"M8.22 2.22a3.932 3.932 0 1 1 5.56 5.56l-2.25 2.25-1.06-1.06 2.25-2.25a2.432 2.432 0 0 0-3.44-3.44L7.03 5.53 5.97 4.47zm3.06 3.56-5.5 5.5-1.06-1.06 5.5-5.5zM2.22 8.22l2.25-2.25 1.06 1.06-2.25 2.25a2.432 2.432 0 0 0 3.44 3.44l2.25-2.25 1.06 1.06-2.25 2.25a3.932 3.932 0 1 1-5.56-5.56\" clip-rule=\"evenodd\"></path></svg></span></button></span></div><p data-renderer-start-pos=\"179\">Unfortunately, this feature is not available in the app. Implementation of such a function has some unwanted side effects due to limitation of Confluence API.</p><div class=\"_3iDTPbvLZJ renderer-heading-wrapper\" data-testid=\"renderer-heading-wrapper\" data-level=\"1\"><h1 data-renderer-start-pos=\"339\" tabindex=\"-1\" id=\"Comment-cannot-be-added-to-unsaved-content\">Comment cannot be added to unsaved content</h1><span role=\"presentation\" class=\"heading-anchor-wrapper css-0\"><button data-testid=\"anchor-button\" id=\"d50f92b8-c85f-461f-8aae-1043eec42b10\" aria-hidden=\"false\" tabindex=\"0\" aria-label=\"Copy link to\" aria-labelledby=\"d50f92b8-c85f-461f-8aae-1043eec42b10 Comment-cannot-be-added-to-unsaved-content\" type=\"button\" class=\"css-x4slh0\"><span role=\"img\" aria-label=\"Copy\" style=\"color: var(--ds-icon-subtle, #505258);\" class=\"_3iDTPbvbI6 _24h04i2Njc _3YEZNOdnbC _26BoRw7dHp _03SyCPU7Rg _0LQT5ECyim _2z3AMPTxK4 _1hdADdMFyn\"><svg fill=\"none\" viewBox=\"0 0 16 16\" role=\"presentation\" class=\"_4bt5LAnQyn _2WAcuGnQyn _1UtDYz98eZ _1pp6NdYbGa _1RrJLiUWqv _24fbFs98eZ _39xV025zaO _0jFU0V5zaO\"><path fill=\"currentcolor\" fill-rule=\"evenodd\" d=\"M8.22 2.22a3.932 3.932 0 1 1 5.56 5.56l-2.25 2.25-1.06-1.06 2.25-2.25a2.432 2.432 0 0 0-3.44-3.44L7.03 5.53 5.97 4.47zm3.06 3.56-5.5 5.5-1.06-1.06 5.5-5.5zM2.22 8.22l2.25-2.25 1.06 1.06-2.25 2.25a2.432 2.432 0 0 0 3.44 3.44l2.25-2.25 1.06 1.06-2.25 2.25a3.932 3.932 0 1 1-5.56-5.56\" clip-rule=\"evenodd\"></path></svg></span></button></span></div><div class=\"_3iDTPbvLZJ renderer-heading-wrapper\" data-testid=\"renderer-heading-wrapper\" data-level=\"2\"><h2 data-renderer-start-pos=\"383\" tabindex=\"-1\" id=\"Symptoms.1\">Symptoms</h2><span role=\"presentation\" class=\"heading-anchor-wrapper css-0\"><button data-testid=\"anchor-button\" id=\"52ad95e9-ece4-4dae-a7c1-cfffa72cb590\" aria-hidden=\"false\" tabindex=\"0\" aria-label=\"Copy link to\" aria-labelledby=\"52ad95e9-ece4-4dae-a7c1-cfffa72cb590 Symptoms.1\" type=\"button\" class=\"css-x4slh0\"><span role=\"img\" aria-label=\"Copy\" style=\"color: var(--ds-icon-subtle, #505258);\" class=\"_3iDTPbvbI6 _24h04i2Njc _3YEZNOdnbC _26BoRw7dHp _03SyCPU7Rg _0LQT5ECyim _2z3AMPTxK4 _1hdADdMFyn\"><svg fill=\"none\" viewBox=\"0 0 16 16\" role=\"presentation\" class=\"_4bt5LAnQyn _2WAcuGnQyn _1UtDYz98eZ _1pp6NdYbGa _1RrJLiUWqv _24fbFs98eZ _39xV025zaO _0jFU0V5zaO\"><path fill=\"currentcolor\" fill-rule=\"evenodd\" d=\"M8.22 2.22a3.932 3.932 0 1 1 5.56 5.56l-2.25 2.25-1.06-1.06 2.25-2.25a2.432 2.432 0 0 0-3.44-3.44L7.03 5.53 5.97 4.47zm3.06 3.56-5.5 5.5-1.06-1.06 5.5-5.5zM2.22 8.22l2.25-2.25 1.06 1.06-2.25 2.25a2.432 2.432 0 0 0 3.44 3.44l2.25-2.25 1.06 1.06-2.25 2.25a3.932 3.932 0 1 1-5.56-5.56\" clip-rule=\"evenodd\"></path></svg></span></button></span></div><p data-renderer-start-pos=\"393\">It is not possible to add comment to just added and unsaved content.</p><div class=\"_3iDTPbvLZJ renderer-heading-wrapper\" data-testid=\"renderer-heading-wrapper\" data-level=\"2\"><h2 data-renderer-start-pos=\"463\" tabindex=\"-1\" id=\"Cause.1\">Cause</h2><span role=\"presentation\" class=\"heading-anchor-wrapper css-0\"><button data-testid=\"anchor-button\" id=\"8bbe3eb9-ba2d-450b-b152-2002e9de7f58\" aria-hidden=\"false\" tabindex=\"0\" aria-label=\"Copy link to\" aria-labelledby=\"8bbe3eb9-ba2d-450b-b152-2002e9de7f58 Cause.1\" type=\"button\" class=\"css-x4slh0\"><span role=\"img\" aria-label=\"Copy\" style=\"color: var(--ds-icon-subtle, #505258);\" class=\"_3iDTPbvbI6 _24h04i2Njc _3YEZNOdnbC _26BoRw7dHp _03SyCPU7Rg _0LQT5ECyim _2z3AMPTxK4 _1hdADdMFyn\"><svg fill=\"none\" viewBox=\"0 0 16 16\" role=\"presentation\" class=\"_4bt5LAnQyn _2WAcuGnQyn _1UtDYz98eZ _1pp6NdYbGa _1RrJLiUWqv _24fbFs98eZ _39xV025zaO _0jFU0V5zaO\"><path fill=\"currentcolor\" fill-rule=\"evenodd\" d=\"M8.22 2.22a3.932 3.932 0 1 1 5.56 5.56l-2.25 2.25-1.06-1.06 2.25-2.25a2.432 2.432 0 0 0-3.44-3.44L7.03 5.53 5.97 4.47zm3.06 3.56-5.5 5.5-1.06-1.06 5.5-5.5zM2.22 8.22l2.25-2.25 1.06 1.06-2.25 2.25a2.432 2.432 0 0 0 3.44 3.44l2.25-2.25 1.06 1.06-2.25 2.25a3.932 3.932 0 1 1-5.56-5.56\" clip-rule=\"evenodd\"></path></svg></span></button></span></div><p data-renderer-start-pos=\"470\">We use standard REST to create/edit inline comments, created by Atlassian. The mechanism of inline comments creation is following: the phrase that we have selected is searched for in the content of the page, but since the content is new, then in fact it is not existing in Confluence and therefore an error appears.</p><div class=\"_3iDTPbvLZJ renderer-heading-wrapper\" data-testid=\"renderer-heading-wrapper\" data-level=\"2\"><h2 data-renderer-start-pos=\"787\" tabindex=\"-1\" id=\"Resolution.1\">Resolution</h2><span role=\"presentation\" class=\"heading-anchor-wrapper css-0\"><button data-testid=\"anchor-button\" id=\"5883fd1f-68e0-4abb-b097-aeaf5cadb612\" aria-hidden=\"false\" tabindex=\"0\" aria-label=\"Copy link to\" aria-labelledby=\"5883fd1f-68e0-4abb-b097-aeaf5cadb612 Resolution.1\" type=\"button\" class=\"css-x4slh0\"><span role=\"img\" aria-label=\"Copy\" style=\"color: var(--ds-icon-subtle, #505258);\" class=\"_3iDTPbvbI6 _24h04i2Njc _3YEZNOdnbC _26BoRw7dHp _03SyCPU7Rg _0LQT5ECyim _2z3AMPTxK4 _1hdADdMFyn\"><svg fill=\"none\" viewBox=\"0 0 16 16\" role=\"presentation\" class=\"_4bt5LAnQyn _2WAcuGnQyn _1UtDYz98eZ _1pp6NdYbGa _1RrJLiUWqv _24fbFs98eZ _39xV025zaO _0jFU0V5zaO\"><path fill=\"currentcolor\" fill-rule=\"evenodd\" d=\"M8.22 2.22a3.932 3.932 0 1 1 5.56 5.56l-2.25 2.25-1.06-1.06 2.25-2.25a2.432 2.432 0 0 0-3.44-3.44L7.03 5.53 5.97 4.47zm3.06 3.56-5.5 5.5-1.06-1.06 5.5-5.5zM2.22 8.22l2.25-2.25 1.06 1.06-2.25 2.25a2.432 2.432 0 0 0 3.44 3.44l2.25-2.25 1.06 1.06-2.25 2.25a3.932 3.932 0 1 1-5.56-5.56\" clip-rule=\"evenodd\"></path></svg></span></button></span></div><p data-renderer-start-pos=\"799\">Unfortunately, this feature is not available in the app. You can save the content first, after that comment adding will be available for the content.</p><div class=\"_3iDTPbvLZJ renderer-heading-wrapper\" data-testid=\"renderer-heading-wrapper\" data-level=\"1\"><h1 data-renderer-start-pos=\"950\" tabindex=\"-1\" id=\"Collaborative-mode-limitations\">Collaborative mode limitations</h1><span role=\"presentation\" class=\"heading-anchor-wrapper css-0\"><button data-testid=\"anchor-button\" id=\"9b77a87a-dbdf-4376-be58-fa6544e34f79\" aria-hidden=\"false\" tabindex=\"0\" aria-label=\"Copy link to\" aria-labelledby=\"9b77a87a-dbdf-4376-be58-fa6544e34f79 Collaborative-mode-limitations\" type=\"button\" class=\"css-x4slh0\"><span role=\"img\" aria-label=\"Copy\" style=\"color: var(--ds-icon-subtle, #505258);\" class=\"_3iDTPbvbI6 _24h04i2Njc _3YEZNOdnbC _26BoRw7dHp _03SyCPU7Rg _0LQT5ECyim _2z3AMPTxK4 _1hdADdMFyn\"><svg fill=\"none\" viewBox=\"0 0 16 16\" role=\"presentation\" class=\"_4bt5LAnQyn _2WAcuGnQyn _1UtDYz98eZ _1pp6NdYbGa _1RrJLiUWqv _24fbFs98eZ _39xV025zaO _0jFU0V5zaO\"><path fill=\"currentcolor\" fill-rule=\"evenodd\" d=\"M8.22 2.22a3.932 3.932 0 1 1 5.56 5.56l-2.25 2.25-1.06-1.06 2.25-2.25a2.432 2.432 0 0 0-3.44-3.44L7.03 5.53 5.97 4.47zm3.06 3.56-5.5 5.5-1.06-1.06 5.5-5.5zM2.22 8.22l2.25-2.25 1.06 1.06-2.25 2.25a2.432 2.432 0 0 0 3.44 3.44l2.25-2.25 1.06 1.06-2.25 2.25a3.932 3.932 0 1 1-5.56-5.56\" clip-rule=\"evenodd\"></path></svg></span></button></span></div><div class=\"_3iDTPbvLZJ renderer-heading-wrapper\" data-testid=\"renderer-heading-wrapper\" data-level=\"2\"><h2 data-renderer-start-pos=\"982\" tabindex=\"-1\" id=\"Symptoms.2\">Symptoms</h2><span role=\"presentation\" class=\"heading-anchor-wrapper css-0\"><button data-testid=\"anchor-button\" id=\"18add48c-d879-4960-9302-c6aef4b45459\" aria-hidden=\"false\" tabindex=\"0\" aria-label=\"Copy link to\" aria-labelledby=\"18add48c-d879-4960-9302-c6aef4b45459 Symptoms.2\" type=\"button\" class=\"css-x4slh0\"><span role=\"img\" aria-label=\"Copy\" style=\"color: var(--ds-icon-subtle, #505258);\" class=\"_3iDTPbvbI6 _24h04i2Njc _3YEZNOdnbC _26BoRw7dHp _03SyCPU7Rg _0LQT5ECyim _2z3AMPTxK4 _1hdADdMFyn\"><svg fill=\"none\" viewBox=\"0 0 16 16\" role=\"presentation\" class=\"_4bt5LAnQyn _2WAcuGnQyn _1UtDYz98eZ _1pp6NdYbGa _1RrJLiUWqv _24fbFs98eZ _39xV025zaO _0jFU0V5zaO\"><path fill=\"currentcolor\" fill-rule=\"evenodd\" d=\"M8.22 2.22a3.932 3.932 0 1 1 5.56 5.56l-2.25 2.25-1.06-1.06 2.25-2.25a2.432 2.432 0 0 0-3.44-3.44L7.03 5.53 5.97 4.47zm3.06 3.56-5.5 5.5-1.06-1.06 5.5-5.5zM2.22 8.22l2.25-2.25 1.06 1.06-2.25 2.25a2.432 2.432 0 0 0 3.44 3.44l2.25-2.25 1.06 1.06-2.25 2.25a3.932 3.932 0 1 1-5.56-5.56\" clip-rule=\"evenodd\"></path></svg></span></button></span></div><ol class=\"ak-ol\" data-indent-level=\"1\" start=\"1\"><li><p data-renderer-start-pos=\"994\">In collaborative mode (editing a page with a colleague in parallel), if a user opens inline comments by clicking on Show comments button, other users who are working on the page at the same time see comments highlights as well.</p></li><li><p data-renderer-start-pos=\"1225\">If a user scrolls through the page in collaborative mode, where inline comments are added, inline comments reserve place on the right side, so text layout in edit mode is changed.</p></li></ol><div class=\"_3iDTPbvLZJ renderer-heading-wrapper\" data-testid=\"renderer-heading-wrapper\" data-level=\"2\"><h2 data-renderer-start-pos=\"1408\" tabindex=\"-1\" id=\"Cause.2\">Cause</h2><span role=\"presentation\" class=\"heading-anchor-wrapper css-0\"><button data-testid=\"anchor-button\" id=\"0462b0ea-bd98-4e2b-a60a-f66ecef924b1\" aria-hidden=\"false\" tabindex=\"0\" aria-label=\"Copy link to\" aria-labelledby=\"0462b0ea-bd98-4e2b-a60a-f66ecef924b1 Cause.2\" type=\"button\" class=\"css-x4slh0\"><span role=\"img\" aria-label=\"Copy\" style=\"color: var(--ds-icon-subtle, #505258);\" class=\"_3iDTPbvbI6 _24h04i2Njc _3YEZNOdnbC _26BoRw7dHp _03SyCPU7Rg _0LQT5ECyim _2z3AMPTxK4 _1hdADdMFyn\"><svg fill=\"none\" viewBox=\"0 0 16 16\" role=\"presentation\" class=\"_4bt5LAnQyn _2WAcuGnQyn _1UtDYz98eZ _1pp6NdYbGa _1RrJLiUWqv _24fbFs98eZ _39xV025zaO _0jFU0V5zaO\"><path fill=\"currentcolor\" fill-rule=\"evenodd\" d=\"M8.22 2.22a3.932 3.932 0 1 1 5.56 5.56l-2.25 2.25-1.06-1.06 2.25-2.25a2.432 2.432 0 0 0-3.44-3.44L7.03 5.53 5.97 4.47zm3.06 3.56-5.5 5.5-1.06-1.06 5.5-5.5zM2.22 8.22l2.25-2.25 1.06 1.06-2.25 2.25a2.432 2.432 0 0 0 3.44 3.44l2.25-2.25 1.06 1.06-2.25 2.25a3.932 3.932 0 1 1-5.56-5.56\" clip-rule=\"evenodd\"></path></svg></span></button></span></div><p data-renderer-start-pos=\"1415\">We work with standard Atlassian collaborative mode. It relates to editor limitations. In edit mode any changes are visible to everyone.</p><div class=\"_3iDTPbvLZJ renderer-heading-wrapper\" data-testid=\"renderer-heading-wrapper\" data-level=\"2\"><h2 data-renderer-start-pos=\"1552\" tabindex=\"-1\" id=\"Resolution.2\">Resolution</h2><span role=\"presentation\" class=\"heading-anchor-wrapper css-0\"><button data-testid=\"anchor-button\" id=\"7afc14c0-1da0-4a76-96d8-8fad9c5b58b2\" aria-hidden=\"false\" tabindex=\"0\" aria-label=\"Copy link to\" aria-labelledby=\"7afc14c0-1da0-4a76-96d8-8fad9c5b58b2 Resolution.2\" type=\"button\" class=\"css-x4slh0\"><span role=\"img\" aria-label=\"Copy\" style=\"color: var(--ds-icon-subtle, #505258);\" class=\"_3iDTPbvbI6 _24h04i2Njc _3YEZNOdnbC _26BoRw7dHp _03SyCPU7Rg _0LQT5ECyim _2z3AMPTxK4 _1hdADdMFyn\"><svg fill=\"none\" viewBox=\"0 0 16 16\" role=\"presentation\" class=\"_4bt5LAnQyn _2WAcuGnQyn _1UtDYz98eZ _1pp6NdYbGa _1RrJLiUWqv _24fbFs98eZ _39xV025zaO _0jFU0V5zaO\"><path fill=\"currentcolor\" fill-rule=\"evenodd\" d=\"M8.22 2.22a3.932 3.932 0 1 1 5.56 5.56l-2.25 2.25-1.06-1.06 2.25-2.25a2.432 2.432 0 0 0-3.44-3.44L7.03 5.53 5.97 4.47zm3.06 3.56-5.5 5.5-1.06-1.06 5.5-5.5zM2.22 8.22l2.25-2.25 1.06 1.06-2.25 2.25a2.432 2.432 0 0 0 3.44 3.44l2.25-2.25 1.06 1.06-2.25 2.25a3.932 3.932 0 1 1-5.56-5.56\" clip-rule=\"evenodd\"></path></svg></span></button></span></div><p data-renderer-start-pos=\"1564\">Unfortunately, this behavior occurs in the collaborative mode and there are technical limitations related to the Atlassian editor. Since the problem requires a comprehensive approach, unfortunately, we cannot give a time estimate for fix.</p></div>"
+}
