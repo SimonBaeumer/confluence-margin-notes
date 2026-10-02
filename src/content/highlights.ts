@@ -4,6 +4,7 @@
 const NAMES = {
   private: 'margin-notes-private',
   draft: 'margin-notes-draft',
+  published: 'margin-notes-published',
   attention: 'margin-notes-attention',
   focus: 'margin-notes-focus',
 } as const;
@@ -13,6 +14,7 @@ export type HighlightKind = keyof typeof NAMES;
 const STYLE = `
 ::highlight(${NAMES.private}) { background-color: rgb(255 214 0 / 0.38); }
 ::highlight(${NAMES.draft}) { background-color: rgb(40 120 255 / 0.22); text-decoration: underline 2px rgb(40 120 255 / 0.85); text-underline-offset: 3px; }
+::highlight(${NAMES.published}) { text-decoration: underline 2px rgb(34 160 107 / 0.85); text-underline-offset: 3px; }
 ::highlight(${NAMES.attention}) { background-color: rgb(255 120 0 / 0.25); text-decoration: underline wavy rgb(220 90 0); }
 ::highlight(${NAMES.focus}) { background-color: rgb(255 140 0 / 0.55); }
 `;
@@ -42,9 +44,9 @@ export class Highlighter {
 
   paint(items: Painted[]): void {
     this.painted = items;
-    const groups: Record<HighlightKind, Range[]> = { private: [], draft: [], attention: [], focus: [] };
+    const groups: Record<HighlightKind, Range[]> = { private: [], draft: [], published: [], attention: [], focus: [] };
     for (const p of items) groups[p.kind].push(...p.ranges);
-    for (const kind of ['private', 'draft', 'attention'] as const) {
+    for (const kind of ['published', 'private', 'draft', 'attention'] as const) {
       const h = new Highlight();
       // Highlight.add is not chainable in Firefox.
       for (const r of groups[kind]) h.add(r);

@@ -196,7 +196,11 @@ export class App {
     if (stale()) return;
     this.notes = notes;
     for (const n of notes) {
-      if (n.state === 'published') continue;
+      if (n.state === 'published') {
+        // Only located, never saved: we paint it until Confluence shows its own highlight.
+        this.results.set(n.id, anchor(n.target, index, version));
+        continue;
+      }
       await this.anchorNote(n, index, version);
       if (stale()) return;
     }
@@ -236,11 +240,17 @@ export class App {
     if (!this.mapper || !Highlighter.supported()) return;
     const items: Painted[] = [];
     for (const n of this.notes) {
-      if (n.state === 'published') continue;
+      // Confluence only draws a new comment's highlight once it re-renders the page (often only
+      // after a reload). Until then the published note keeps ours, or it would vanish.
+      if (n.state === 'published' && this.commentMark(n.id)) continue;
       const r = this.results.get(n.id);
       if (!r || r.start < 0) continue;
       const ranges = this.mapper.offsetsToRanges(r.start, r.end);
       if (!ranges.length) continue;
+      if (n.state === 'published') {
+        items.push({ noteId: n.id, kind: 'published', ranges });
+        continue;
+      }
       const attention = r.status === 'ambiguous' || r.status === 'changed' || n.target.exact !== n.target.originalExact;
       items.push({ noteId: n.id, kind: attention ? 'attention' : n.state === 'draft' ? 'draft' : 'private', ranges });
     }

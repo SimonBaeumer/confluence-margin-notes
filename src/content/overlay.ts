@@ -285,7 +285,8 @@ export class Overlay {
             d,
             'div',
             { class: 'row end' },
-            n.published?.webUrl ? h(d, 'a', { class: 'b', href: n.published.webUrl, target: '_blank' }, 'Open comment') : null,
+            // Same tab: loading the comment's URL also makes Confluence render its highlight and thread.
+            n.published?.webUrl ? h(d, 'button', { class: 'b', onclick: () => location.assign(n.published!.webUrl!) }, 'Open comment') : null,
             h(d, 'button', { class: 'b', onclick: () => this.closePopover() }, 'Close'),
           ),
     );
