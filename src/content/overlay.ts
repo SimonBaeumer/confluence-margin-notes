@@ -255,6 +255,9 @@ export class Overlay {
     const n = p.note;
     const editable = n.state !== 'published';
     const editor = editable ? createEditor(d, n.body) : null;
+    const lost = n.anchorStatus === 'orphaned' || n.anchorStatus === 'ambiguous';
+    const canPublish = n.publishable && !lost;
+    const blockedTitle = lost ? 'Re-attach the note first' : (n.unpublishableReason ?? '');
     const stateLabel = n.state === 'private' ? 'Private note' : n.state === 'draft' ? 'Draft comment' : 'Published comment';
     const pop = h(
       d,
@@ -275,7 +278,7 @@ export class Overlay {
             n.state === 'private'
               ? h(d, 'button', { class: 'b', disabled: !n.publishable, title: n.unpublishableReason ?? '', onclick: () => (saveBody(), p.onState('draft'), this.closePopover()) }, 'Make draft comment')
               : h(d, 'button', { class: 'b', onclick: () => (saveBody(), p.onState('private'), this.closePopover()) }, 'Make private'),
-            h(d, 'button', { class: 'b', disabled: !n.publishable, title: n.unpublishableReason ?? '', onclick: () => (saveBody(), p.onPublish(), this.closePopover()) }, 'Publish now'),
+            h(d, 'button', { class: 'b', disabled: !canPublish, title: blockedTitle, onclick: () => (saveBody(), p.onPublish(), this.closePopover()) }, 'Publish now'),
             h(d, 'button', { class: 'b primary', onclick: () => (saveBody(), this.closePopover()) }, 'Save'),
           )
         : h(

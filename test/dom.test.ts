@@ -6,13 +6,15 @@ import { DomMapper } from '../src/confluence/dom';
 
 function load(name: string) {
   const { adf, html } = JSON.parse(readFileSync(`test/fixtures/${name}`, "utf8"));
-  document.body.innerHTML = `<div id="main-content">${html}</div>`;
+  // Drop embedded frames and images: happy-dom would try to load them.
+  const clean = String(html).replace(/<iframe[\s\S]*?<\/iframe>/g, '').replace(/<img[^>]*>/g, '');
+  document.body.innerHTML = `<div id="main-content">${clean}</div>`;
   const root = document.querySelector<HTMLElement>('.ak-renderer-document')!;
   const index = buildIndex(adf);
   return { index, mapper: new DomMapper(root, index) };
 }
 
-const FIXTURES = ['example-page.json'];
+const FIXTURES = ['example-page.json', 'example-rfc.json'];
 
 describe.each(FIXTURES)('DomMapper on %s', (name) => {
   it('maps (almost) every text block to its element', () => {
