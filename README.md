@@ -6,6 +6,38 @@ A personal Firefox extension for private notes on Confluence Cloud pages, anchor
 
 Background, research and design: [idea.md](idea.md), [research.md](research.md) and the `appendix-*.md` files.
 
+## Getting started
+
+### Prerequisites
+
+- Firefox 150 or newer
+- Node.js (current LTS) and npm
+- A Confluence Cloud site on `*.atlassian.net` you are logged in to
+
+### Install
+
+```sh
+git clone git@github.com:SimonBaeumer/confluence-margin-notes.git
+cd confluence-margin-notes
+npm install
+```
+
+### Load the extension
+
+**Quickest:** `npm run dev` starts a fresh Firefox profile with the extension loaded and reloads it on every change.
+
+**In your own Firefox profile (until restart):**
+
+1. `npm run build` (output in `.output/firefox-mv3`).
+2. Open `about:debugging#/runtime/this-firefox` and click **Load Temporary Add-on...**.
+3. Select `.output/firefox-mv3/manifest.json`.
+
+Temporary add-ons are removed when Firefox closes. To keep it installed, sign it as described in [Installing permanently](#installing-permanently).
+
+### Grant site access
+
+Firefox does not grant host permissions to Manifest V3 add-ons at install time. Open a Confluence page, click the extensions button in the toolbar and allow margin-notes on `*.atlassian.net` (or enable it under `about:addons` > margin-notes > **Permissions**). Then reload the page and select some text to add your first note.
+
 ## Using it
 
 - **Select text** on a Confluence page (view mode), then click **Add note** (or press `Alt+Shift+M`, or use the context menu). Write the note and choose:
