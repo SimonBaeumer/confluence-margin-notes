@@ -54,7 +54,7 @@ Each note stores the block `localId`, the page version, the quote with 64 charac
 
 Publishing re-checks every note against the latest page right before its POST. Anchored and moved notes publish directly, changed ones need a confirmation, ambiguous and orphaned ones are blocked. The occurrence index Confluence needs is computed from that same fresh snapshot. Nothing is ever published on uncertain text.
 
-## Verified on gridfuse.atlassian.net (2026-10-02, Firefox 154)
+## Verified on example.atlassian.net (2026-10-02, Firefox 154)
 
 The open spike questions from [idea.md](idea.md), answered on a sandbox copy of an RFC (page `2073722940`):
 

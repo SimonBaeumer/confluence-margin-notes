@@ -17,7 +17,7 @@ Research found no existing tool that combines private notes anchored to text, lo
 
 ## Who Is It For
 
-One person: me, an engineering manager who reviews RFCs, designs and specs on `gridfuse.atlassian.net` in Firefox 150, on more than one machine. No team rollout, no store listing, no admin involvement.
+One person: me, an engineering manager who reviews RFCs, designs and specs on `example.atlassian.net` in Firefox 150, on more than one machine. No team rollout, no store listing, no admin involvement.
 
 ## What Does Success Look Like
 

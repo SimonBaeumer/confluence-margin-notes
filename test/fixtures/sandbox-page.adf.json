@@ -15,7 +15,7 @@
           "type": "inlineCard",
           "attrs": {
             "localId": "5bdb6af165cf",
-            "url": "https://gridfuse.atlassian.net/wiki/spaces/GF/pages/1894580234"
+            "url": "https://example.atlassian.net/wiki/spaces/GF/pages/1894580234"
           }
         },
         {
@@ -105,7 +105,7 @@
                       "type": "inlineCard",
                       "attrs": {
                         "localId": "94d098212ced",
-                        "url": "https://gridfuse.atlassian.net/jira/software/c/projects/GFC/boards/6?selectedIssue=GFC-9882"
+                        "url": "https://example.atlassian.net/jira/software/c/projects/GFC/boards/6?selectedIssue=GFC-9882"
                       }
                     },
                     {
@@ -495,7 +495,7 @@
                   "type": "inlineCard",
                   "attrs": {
                     "localId": "1f0977284a7a",
-                    "url": "https://gridfuse.atlassian.net/wiki/spaces/GF/pages/1965621251"
+                    "url": "https://example.atlassian.net/wiki/spaces/GF/pages/1965621251"
                   }
                 },
                 {
@@ -2834,7 +2834,7 @@
           "type": "inlineCard",
           "attrs": {
             "localId": "11fd017c251a",
-            "url": "https://gridfuse.atlassian.net/jira/software/c/projects/GFC/boards/6?assignee=6213fc6f37096d006a684210&selectedIssue=GFC-9872"
+            "url": "https://example.atlassian.net/jira/software/c/projects/GFC/boards/6?assignee=6213fc6f37096d006a684210&selectedIssue=GFC-9872"
           }
         },
         {
@@ -3129,7 +3129,7 @@
                     {
                       "type": "link",
                       "attrs": {
-                        "href": "https://gridfuse.atlassian.net/wiki/spaces/GF/pages/1947472820/RFC-2026-08-25+Multi-Criteria+Weighted+Solver#Context-%2F-Starting-point"
+                        "href": "https://example.atlassian.net/wiki/spaces/GF/pages/1947472820/RFC-2026-08-25+Multi-Criteria+Weighted+Solver#Context-%2F-Starting-point"
                       }
                     }
                   ]
@@ -4426,7 +4426,7 @@
                     {
                       "type": "link",
                       "attrs": {
-                        "href": "https://gridfuse.atlassian.net/wiki/spaces/GF/pages/1947472820/RFC-2026-08-25+Multi-Criteria+Weighted+Solver#Context-%2F-Starting-point"
+                        "href": "https://example.atlassian.net/wiki/spaces/GF/pages/1947472820/RFC-2026-08-25+Multi-Criteria+Weighted+Solver#Context-%2F-Starting-point"
                       }
                     }
                   ]
@@ -5723,7 +5723,7 @@
           "type": "inlineCard",
           "attrs": {
             "localId": "d6211117d654",
-            "url": "https://gridfuse.atlassian.net/wiki/spaces/GF/pages/1965621251"
+            "url": "https://example.atlassian.net/wiki/spaces/GF/pages/1965621251"
           }
         },
         {
@@ -5782,7 +5782,7 @@
           "type": "inlineCard",
           "attrs": {
             "localId": "a1caa2025f47",
-            "url": "https://gridfuse.atlassian.net/jira/software/c/projects/GFC/boards/6?assignee=6213fc6f37096d006a684210&selectedIssue=GFC-9872"
+            "url": "https://example.atlassian.net/jira/software/c/projects/GFC/boards/6?assignee=6213fc6f37096d006a684210&selectedIssue=GFC-9872"
           }
         },
         {
@@ -6870,7 +6870,7 @@
                       "type": "inlineCard",
                       "attrs": {
                         "localId": "5f98d814-c031-4962-9ff3-95fdc5be2237",
-                        "url": "https://gridfuse.atlassian.net/jira/software/c/projects/GFC/boards/6?assignee=6213fc6f37096d006a684210&selectedIssue=GFC-9872"
+                        "url": "https://example.atlassian.net/jira/software/c/projects/GFC/boards/6?assignee=6213fc6f37096d006a684210&selectedIssue=GFC-9872"
                       }
                     },
                     {

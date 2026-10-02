@@ -8,7 +8,7 @@ When reviewing Confluence pages (RFCs, designs, specs), I want to write my thoug
 - Authors get a stream of notifications during my review instead of one coherent batch.
 - Some thoughts are only for me (reminders, 1:1 talking points, opinions about people or politics) and must never be published.
 
-**Who:** one user (me) on Confluence Cloud (`gridfuse.atlassian.net`), using Firefox first. Chrome may come later.
+**Who:** one user (me) on Confluence Cloud (`example.atlassian.net`), using Firefox first. Chrome may come later.
 
 **What success looks like:**
 1. Select text on a Confluence page and attach a private note. It survives reloads and page edits.
@@ -186,7 +186,7 @@ Split the extension into a **core** (notes, anchoring, highlights, sidebar, stor
 
 Items that **block the spec** can be answered by a short spike on the real tenant. They become Task 0 of the plan rather than guesses.
 
-1. **(Spike)** Does a content-script POST from Firefox MV3 pass the XSRF check on `gridfuse.atlassian.net`? What exact error body comes back for a wrong match count or for text that isn't found?
+1. **(Spike)** Does a content-script POST from Firefox MV3 pass the XSRF check on `example.atlassian.net`? What exact error body comes back for a wrong match count or for text that isn't found?
 2. **(Spike)** Are selections spanning several paragraphs, table cells or a bold/link boundary accepted by the API?
 3. **(Spike)** Does creating an inline comment bump the page version? Does the response include `inlineMarkerRef`?
 4. **(Spike)** Does the highlight's `data-id` on the page equal the `inlineMarkerRef`? That would let us link published notes to native highlights.

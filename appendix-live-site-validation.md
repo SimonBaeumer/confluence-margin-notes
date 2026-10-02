@@ -1,4 +1,4 @@
-# Appendix: Live Site Validation (gridfuse.atlassian.net)
+# Appendix: Live Site Validation (example.atlassian.net)
 
 ## Summary
 A read-only check (done 2026-10-02 through the Atlassian Rovo MCP) of how existing inline comments on a real RFC page are stored. It confirms the shape of the data that margin-notes must produce when publishing, and shows what real review comments look like: short, often anchored to a single repeated term, and sometimes containing links and formatting. No writes were made.
@@ -6,7 +6,7 @@ A read-only check (done 2026-10-02 through the Atlassian Rovo MCP) of how existi
 ## Findings
 
 ### Target site
-- Site: `https://gridfuse.atlassian.net` (Confluence Cloud), cloudId `fb7d36eb-936c-4e86-bcd0-1fdbc3937b0a`.
+- Site: `https://example.atlassian.net` (Confluence Cloud), cloudId `fb7d36eb-936c-4e86-bcd0-1fdbc3937b0a`.
 - Test page: an RFC page in space `GF` (page id `2068971521`) with many open inline comments, several from the user during a review session on 2026-10-01. That is the workflow margin-notes targets.
 
 ### How an inline comment is stored
