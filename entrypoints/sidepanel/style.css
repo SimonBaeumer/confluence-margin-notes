@@ -56,6 +56,8 @@ textarea { min-height: 52px; resize: vertical; }
 .page-link { all: unset; cursor: pointer; font-weight: 600; color: var(--mn-link); }
 .group ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
 .group li { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.group li.jump { cursor: pointer; border-radius: 4px; padding: 1px 2px; }
+.group li.jump:hover { background: var(--mn-hover); }
 .group .q { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--mn-muted); }
 .settings { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--mn-border); border-radius: 8px; padding: 10px; }
 .settings p { margin: 0; font-size: 12.5px; }

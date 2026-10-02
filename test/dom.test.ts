@@ -2,7 +2,7 @@
 // DomMapper against real rendered Confluence pages, saved with their ADF.
 import { readFileSync } from 'node:fs';
 import { buildIndex } from '../src/core/adf-text';
-import { DomMapper } from '../src/confluence/dom';
+import { DomMapper, findCommentMark, findRoot } from '../src/confluence/dom';
 
 function load(name: string) {
   const { adf, html } = JSON.parse(readFileSync(`test/fixtures/${name}`, "utf8"));
@@ -45,5 +45,31 @@ describe.each(FIXTURES)('DomMapper on %s', (name) => {
     const [a, b] = index.blocks.filter((x) => x.text.length > 10).slice(1, 3);
     const range = mapper.offsetsToRange(a!.end - 5, b!.start + 5)!;
     expect(mapper.rangeToOffsets(range)).toEqual({ start: a!.end - 5, end: b!.start + 5 });
+  });
+});
+
+describe('findRoot', () => {
+  // Layout seen on the live site with an inline comment open and a footer comment below.
+  const renderer = (text: string) => `<div class="ak-renderer-document"><p data-renderer-start-pos="1">${text}</p></div>`;
+  beforeEach(() => {
+    document.body.innerHTML = `
+      <div id="main-content">
+        <div data-testid="pageContentRendererTestId">
+          <div data-testid="renderer-comments-sidebar"><div data-testid="inline-comment-sidebar-wrapper">
+            <div data-testid="inline-comment-container">${renderer('comment body')}</div>
+          </div></div>
+          ${renderer('page <mark data-mark-type="annotation" data-id="ref-1">body</mark>')}
+        </div>
+      </div>
+      <div data-testid="object-comment-wrapper">${renderer('footer comment')}</div>`;
+  });
+
+  it('skips comment renderers that come before the page body', () => {
+    expect(findRoot()?.textContent).toBe('page body');
+  });
+
+  it('finds the highlight of a published comment by its marker ref', () => {
+    expect(findCommentMark(findRoot()!, 'ref-1')?.textContent).toBe('body');
+    expect(findCommentMark(findRoot()!, 'ref-2')).toBeNull();
   });
 });

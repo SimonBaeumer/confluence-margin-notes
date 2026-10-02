@@ -15,6 +15,11 @@ export default defineContentScript({
         document.documentElement.dataset.mnDebug = JSON.stringify(app.debug());
       });
       document.addEventListener('mn-e2e-open-sidebar', () => void browser.runtime.sendMessage({ type: 'e2e-open-sidebar' }));
+      // Jumps to the note whose id is in data-mn-jump, writes true/false to data-mn-jump-result.
+      document.addEventListener('mn-e2e-jump', async () => {
+        const root = document.documentElement;
+        root.dataset.mnJumpResult = String(await app.jumpTo(root.dataset.mnJump ?? ''));
+      });
     }
   },
 });

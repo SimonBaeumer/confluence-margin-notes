@@ -9,10 +9,26 @@
 import DiffMatchPatch from 'diff-match-patch';
 import type { PageTextIndex, TextBlock } from '../core/adf-text';
 
-export const ROOT_SELECTOR = '#main-content .ak-renderer-document, .ak-renderer-document';
+export const ROOT_SELECTOR = '.ak-renderer-document';
 
+/**
+ * Comment bodies use the same renderer. An open inline comment renders inside
+ * #main-content before the page body, footer comments render after it.
+ */
+const COMMENT_SELECTOR =
+  '[data-testid="renderer-comments-sidebar"], [data-testid^="inline-comment"], [data-testid="object-comment-wrapper"], [data-testid^="footer-comment"]';
+
+/** The renderer of the page body, never one of a comment or a nested renderer. */
 export function findRoot(doc: Document = document): HTMLElement | null {
-  return doc.querySelector<HTMLElement>(ROOT_SELECTOR);
+  const candidates = Array.from(doc.querySelectorAll<HTMLElement>(ROOT_SELECTOR)).filter(
+    (el) => !el.closest(COMMENT_SELECTOR) && !el.parentElement?.closest(ROOT_SELECTOR),
+  );
+  return candidates.find((el) => el.closest('#main-content')) ?? candidates[0] ?? null;
+}
+
+/** Confluence's own highlight of a published inline comment. */
+export function findCommentMark(root: HTMLElement, markerRef: string): HTMLElement | null {
+  return root.querySelector<HTMLElement>(`mark[data-mark-type="annotation"][data-id="${CSS.escape(markerRef)}"]`);
 }
 
 export interface PageMeta {
