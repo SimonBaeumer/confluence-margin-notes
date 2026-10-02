@@ -32,7 +32,7 @@ npm install
 2. Open `about:debugging#/runtime/this-firefox` and click **Load Temporary Add-on...**.
 3. Select `.output/firefox-mv3/manifest.json`.
 
-Temporary add-ons are removed when Firefox closes. To keep it installed, sign it as described in [Installing permanently](#installing-permanently).
+Temporary add-ons are removed when Firefox closes. To keep it installed without publishing it to the store, see [Installing permanently](#installing-permanently).
 
 ### Grant site access
 
@@ -100,12 +100,47 @@ npm run lint:ext     # web-ext lint (what AMO runs when signing)
 
 ## Installing permanently
 
-Firefox release only installs signed add-ons. Sign through AMO's unlisted channel (no store listing):
+A temporary add-on is gone after a restart. There are two ways to keep margin-notes installed without publishing it on addons.mozilla.org (AMO):
 
-```sh
-export WEB_EXT_API_KEY=...      # AMO > Developer Hub > Manage API Keys (JWT issuer)
-export WEB_EXT_API_SECRET=...
-npm run build && npm run sign   # signed .xpi in web-ext-artifacts/
-```
+| | Option A: self-signed, unlisted | Option B: unsigned |
+|---|---|---|
+| Firefox edition | Any, including release | Developer Edition, Nightly, ESR or unbranded builds only |
+| Needs an AMO account | Yes (free), but the add-on is never listed or public | No |
+| Updates | Re-sign and reinstall each new version (bump `version` in `package.json` first) | Rebuild and reinstall |
 
-Then install it via `about:addons` > gear > **Install Add-on From File**. Keep the add-on ID (`margin-notes@simonbaeumer.local`) unchanged, or `storage.local` (all your notes) is lost. Uninstalling also deletes it, so export regularly.
+### Option A: sign through AMO's unlisted channel (recommended)
+
+Firefox release and Beta only install add-ons signed by Mozilla. The unlisted channel signs the add-on automatically within minutes, without a store page, review queue or public download.
+
+1. Create an account on [addons.mozilla.org](https://addons.mozilla.org) and generate API credentials under **Developer Hub > Manage API Keys**.
+2. Build and sign:
+
+   ```sh
+   export WEB_EXT_API_KEY=...      # JWT issuer
+   export WEB_EXT_API_SECRET=...   # JWT secret
+   npm run build && npm run sign   # signed .xpi in web-ext-artifacts/
+   ```
+
+3. In Firefox open `about:addons`, click the gear icon, choose **Install Add-on From File...** and select the `.xpi` from `web-ext-artifacts/`.
+
+AMO rejects a version number it has already signed, so bump `version` in `package.json` before signing again. Installing a newer signed `.xpi` the same way upgrades the add-on in place and keeps your notes.
+
+### Option B: install unsigned (Developer Edition, Nightly, ESR)
+
+These editions let you switch off the signature check. Firefox release and Beta ignore this setting.
+
+1. Open `about:config` and set `xpinstall.signatures.required` to `false`.
+2. Build and pack the extension:
+
+   ```sh
+   npm run build
+   (cd .output/firefox-mv3 && zip -r ../margin-notes.xpi .)
+   ```
+
+3. In `about:addons`, click the gear icon, choose **Install Add-on From File...** and select `.output/margin-notes.xpi`.
+
+Firefox marks the add-on as unverified but keeps it across restarts.
+
+### Keeping your notes
+
+Notes live in the add-on's `storage.local`, which is tied to the add-on ID `margin-notes@s-baeumer.de`. Keep that ID unchanged in `wxt.config.ts`, or Firefox treats the build as a different add-on and your notes are not visible to it. Uninstalling the add-on deletes its storage, so export your notes from the sidebar (**Settings** > **Export JSON**) before uninstalling or switching between options.

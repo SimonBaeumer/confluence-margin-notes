@@ -12,7 +12,7 @@ export default defineConfig({
     host_permissions: ['https://*.atlassian.net/*'],
     browser_specific_settings: {
       gecko: {
-        id: 'margin-notes@simonbaeumer.local',
+        id: 'margin-notes@s-baeumer.de',
         strict_min_version: '150.0',
         data_collection_permissions: { required: ['none'] },
       },

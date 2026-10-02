@@ -150,7 +150,7 @@ Recommendation: send the publish call **from the content script on the Confluenc
   "description": "Private notes anchored to Confluence text, publishable as inline comments.",
   "browser_specific_settings": {
     "gecko": {
-      "id": "margin-notes@simonbaeumer.local",
+      "id": "margin-notes@s-baeumer.de",
       "strict_min_version": "140.0",
       "data_collection_permissions": { "required": ["none"] }
     }
