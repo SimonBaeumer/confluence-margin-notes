@@ -149,6 +149,13 @@ Firefox release and Beta only install add-ons signed by Mozilla. The unlisted ch
 
 AMO rejects a version number it has already signed, so bump `version` in `package.json` before signing again. Installing a newer signed `.xpi` the same way upgrades the add-on in place and keeps your notes.
 
+Releases can also be signed in CI: `.github/workflows/release.yml` runs on a pushed `v*` tag, checks that the tag matches `version` in `package.json`, runs the checks, signs and attaches the `.xpi` to a GitHub release. It needs the repository secrets `WEB_EXT_API_KEY` and `WEB_EXT_API_SECRET`.
+
+```sh
+npm version patch --no-git-tag-version   # bump version, then commit and merge
+git tag v0.1.3 && git push origin v0.1.3
+```
+
 ### Option B: install unsigned (Developer Edition, Nightly, ESR)
 
 These editions let you switch off the signature check. Firefox release and Beta ignore this setting.
