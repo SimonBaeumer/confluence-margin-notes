@@ -20,6 +20,23 @@ Each note stores the block `localId`, the page version, the quote with 64 charac
 
 Publishing re-checks every note against the latest page right before its POST. Anchored and moved notes publish directly, changed ones need a confirmation, ambiguous and orphaned ones are blocked. The occurrence index Confluence needs is computed from that same fresh snapshot. Nothing is ever published on uncertain text.
 
+## Verified on gridfuse.atlassian.net (2026-10-02, Firefox 154)
+
+The open spike questions from [idea.md](idea.md), answered on a sandbox copy of an RFC (page `2073722940`):
+
+| Question | Answer |
+|---|---|
+| Does a content-script POST pass the XSRF check? | Yes. Same-origin `fetch` with the session cookie works; no token needed. |
+| Error bodies for a bad selection? | Text not found, wrong match count and index out of range all return the same `400 {"errors":[{"code":"BAD_REQUEST","title":"Can not create inline comment"}]}`. The server verifies the count, so a wrong count can never land on the wrong text. |
+| Selections across paragraphs, formatting, smart links? | All accepted. The selection is sent in the ADF text model (`"parks.M3 and M4"`, atoms as empty text) and Confluence marks every text piece in range. |
+| Does a comment bump the page version? | No. The body gains an `annotation` mark but `version.number` stays the same. |
+| `inlineMarkerRef` in the create response? | Yes, in `properties`. The rendered `mark[data-id]` equals it. |
+| Do highlights from a content script reach the page? | Yes, `CSS.highlights` registrations from the isolated world render normally. |
+| Renderer positions? | `data-renderer-start-pos` is the position after the block's opening token. Code blocks carry none and are found by `data-local-id`. |
+| Re-anchoring after an edit (API edit: insertion at top, reworded sentence, deleted paragraph)? | Repeated term kept its occurrence, moved text anchored, the reworded sentence became **changed** (publishing asked for confirmation), the deleted one became **orphaned** and could be re-attached. |
+
+Not verified yet: whether the Confluence *editor* keeps block `localId`s on edits (the test edited via the API, which keeps them; the cascade does not depend on it), and behaviour on Live Docs.
+
 ## Development
 
 ```sh

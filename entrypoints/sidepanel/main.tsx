@@ -127,6 +127,9 @@ function NoteCard({ note, onPage }: { note: Note; onPage: boolean }) {
     setMsg(r?.error ?? null);
   };
   const changed = note.state !== 'published' && note.target.exact !== note.target.originalExact;
+  const lost = note.anchorStatus === 'orphaned' || note.anchorStatus === 'ambiguous';
+  const publishBlocked = !note.publishable || lost;
+  const blockedTitle = lost ? 'Re-attach the note first' : (note.unpublishableReason ?? '');
   return (
     <article class={`note ${note.state}`}>
       <header>
@@ -171,7 +174,7 @@ function NoteCard({ note, onPage }: { note: Note; onPage: boolean }) {
                 </button>
               )}
               {onPage && (
-                <button class="b" disabled={!note.publishable} title={note.unpublishableReason ?? ''} onClick={() => void toTab({ type: 'publish-now', noteId: note.id })}>
+                <button class="b" disabled={publishBlocked} title={blockedTitle} onClick={() => void toTab({ type: 'publish-now', noteId: note.id })}>
                   Publish now
                 </button>
               )}

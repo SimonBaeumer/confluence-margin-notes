@@ -220,7 +220,7 @@ export class App {
       if (!r || r.start < 0) continue;
       const ranges = this.mapper.offsetsToRanges(r.start, r.end);
       if (!ranges.length) continue;
-      const attention = r.status === 'ambiguous' || r.status === 'changed';
+      const attention = r.status === 'ambiguous' || r.status === 'changed' || n.target.exact !== n.target.originalExact;
       items.push({ noteId: n.id, kind: attention ? 'attention' : n.state === 'draft' ? 'draft' : 'private', ranges });
     }
     this.highlighter.paint(items);
@@ -385,7 +385,12 @@ export class App {
   // ---- publishing -------------------------------------------------------------
 
   private dialogItem(n: Note): DialogItem {
-    const r = this.results.get(n.id);
+    let r = this.results.get(n.id);
+    if (!r && this.index && this.indexVersion !== null) {
+      // A note created a moment ago may not have been through a refresh yet.
+      r = anchor(n.target, this.index, this.indexVersion);
+      this.results.set(n.id, r);
+    }
     if (!n.publishable) return { note: n, status: 'Cannot publish', tone: 'err', blockedReason: n.unpublishableReason };
     if (!r) return { note: n, status: 'Unchecked', tone: 'warn', blockedReason: null };
     const g = gateFor(n, r);

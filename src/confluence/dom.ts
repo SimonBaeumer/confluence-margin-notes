@@ -134,7 +134,12 @@ export class DomMapper {
     for (const block of this.index.blocks) {
       const candidates = byPos.get(block.pmPos + delta) ?? [];
       // Prefer the innermost element (a wrapper and its block may share a position).
-      const el = candidates.sort((a, b) => (a.contains(b) ? 1 : b.contains(a) ? -1 : 0))[0];
+      let el = candidates.sort((a, b) => (a.contains(b) ? 1 : b.contains(a) ? -1 : 0))[0];
+      if (!el && block.localId) {
+        // Code blocks carry no position, only their localId.
+        const byId = this.root.querySelector<HTMLElement>(`[data-local-id="${CSS.escape(block.localId)}"]`);
+        el = byId?.querySelector<HTMLElement>('[data-testid="renderer-code-block"]') ?? byId ?? undefined;
+      }
       if (!el) continue;
       const { nodes, starts, text } = collectText(el);
       const a2d = dmp.diff_main(block.text, text) as [number, string][];
