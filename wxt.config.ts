@@ -20,11 +20,12 @@ export default defineConfig({
     action: { default_title: 'margin-notes' },
     commands: {
       'add-note': {
-        suggested_key: { default: 'Alt+Shift+M' },
+        // Option+letter types a character on many Mac layouts, so Macs use Control.
+        suggested_key: { default: 'Alt+Shift+M', mac: 'MacCtrl+Shift+M' },
         description: 'Add a note to the current selection',
       },
       _execute_sidebar_action: {
-        suggested_key: { default: 'Alt+Shift+N' },
+        suggested_key: { default: 'Alt+Shift+N', mac: 'MacCtrl+Shift+N' },
         description: 'Open the margin-notes sidebar',
       },
     },

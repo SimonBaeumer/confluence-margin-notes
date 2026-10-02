@@ -1,6 +1,6 @@
 // Messages between the sidebar, background and content script. Plain JSON only.
 
-import type { AnchorStatus, PageRef } from './model';
+import type { AdfDoc, AnchorStatus, PageRef } from './model';
 
 export type ToContent =
   | { type: 'add-note' }
@@ -11,7 +11,22 @@ export type ToContent =
   | { type: 'jump-to'; noteId: string }
   | { type: 'open-submit' }
   | { type: 'publish-now'; noteId: string }
-  | { type: 'reattach'; noteId: string };
+  | { type: 'reattach'; noteId: string }
+  /** Replaces the text of a published comment in Confluence. Answers { error }. */
+  | { type: 'edit-published'; noteId: string; body: AdfDoc }
+  /** Deletes a published comment in Confluence; the note becomes private. Answers { error }. */
+  | { type: 'unpublish'; noteId: string }
+  /** Re-reads resolution and replies of published notes on this site. Answers { error }. */
+  | { type: 'refresh-threads' }
+  /** Sets up sync on this tab's site. Answers { error }. */
+  | { type: 'sync-setup' }
+  /** Answers { error }. */
+  | { type: 'sync-now' };
+
+/** Answer to the actions above: null on success. */
+export interface ActionResult {
+  error: string | null;
+}
 
 export interface PageInfo {
   page: PageRef | null;

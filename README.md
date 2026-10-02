@@ -40,13 +40,34 @@ Firefox does not grant host permissions to Manifest V3 add-ons at install time. 
 
 ## Using it
 
-- **Select text** on a Confluence page (view mode), then click **Add note** (or press `Alt+Shift+M`, or use the context menu). Write the note and choose:
+- **Select text** on a Confluence page (view mode), then click **Add note** (or press `Alt+Shift+M`, `Ctrl+Shift+M` on a Mac, or use the context menu). Write the note and choose:
   - **Keep private**: yellow highlight, never published.
   - **Add draft comment**: blue highlight, collected for the next submit.
   - **Publish now**: posted as an inline comment right away.
+- Shortcuts can be changed in `about:addons` > gear icon > **Manage Extension Shortcuts**.
 - **Click a highlight** to edit the note, switch it between private and draft, publish it, or delete it.
 - The **Draft comments** pill at the bottom right shows how many drafts are pending. **Submit** opens a dialog with every draft in document order and an optional summary (posted as a page comment after the inline comments). **Discard** turns all drafts back into private notes; nothing is deleted.
-- The **sidebar** (toolbar button or `Alt+Shift+N`) lists the notes on the current page with filters, shows notes that need attention (text changed, ambiguous, orphaned), lets you re-attach them to a new selection, and has an **All notes** view across pages plus JSON export/import.
+- The **sidebar** (toolbar button, or `Alt+Shift+N`, `Ctrl+Shift+N` on a Mac) lists the notes on the current page with filters, shows notes that need attention (text changed, ambiguous, orphaned), lets you re-attach them to a new selection, and has an **All notes** view across pages plus JSON export/import.
+- **Search** in the sidebar (on the page view and in **All notes**): every word and `"quoted phrase"` must appear in the note, its quote, the page title or a reply. Case and accents are ignored. Filters: `is:private`, `is:draft`, `is:published`, `is:resolved`, `is:open`, `is:deleted`, `is:unread`, `has:replies`, `is:attention`. For example `solver is:draft`.
+
+### After publishing
+
+- A published note shows what happened to its comment in Confluence: **open**, **resolved**, **reopened**, **text removed from the page** or **deleted**, plus its replies. Comments are re-read when you open their page (at most every 2 minutes) and, every 10 minutes, for up to 25 published notes on other pages of the same site. Replies by others that you have not seen yet are marked **new**, and **All notes** shows how many notes have new replies. Opening the note, jumping to the comment or **Mark read** clears them.
+- **Edit comment** changes the comment's text in Confluence. **Unpublish** deletes the comment in Confluence (after a confirmation) and keeps the note as a private note. Confluence does not delete replies with their comment but keeps them as separate comments, so your own replies are deleted first, and a comment with replies by other people cannot be unpublished (resolve it instead). Both work from any open page on the comment's site.
+
+### Sync between machines
+
+Settings > **Sync between machines** > **Set up sync** keeps your notes on a page titled “margin-notes sync” in your Confluence personal space. The page is created as a private page, and its read restriction is checked to contain only you before anything is written to it (and again every hour). Run the setup on each machine with the same Atlassian account: the first creates the page, the others find it and merge.
+
+- Sync runs in Confluence tabs on that site: when a page loads, 10 seconds after a change and every 5 minutes. **Sync now** runs it right away.
+- Each note merges by last writer wins on `updatedAt`, except that a deletion always wins over an edit. Writes use the page version, so two machines writing at the same time merge again instead of overwriting each other.
+- A sync page whose content is not margin-notes data is never overwritten; the error shows in Settings.
+- Each sync that changes something adds a page version, so the page history grows over time.
+- Draft comment summaries (the optional page comment) are not synced, only the notes.
+
+### Deleted notes
+
+Deleting a note keeps a small tombstone so the deletion can reach other machines. Tombstones are purged after 30 days; with sync on, only once the deletion is on the sync page. On the sync page they become a list of purged ids, kept for a year. A machine that has not synced for longer than a year can bring deleted notes back.
 
 ### Staying on the right text
 
@@ -94,9 +115,12 @@ npm run lint:ext     # web-ext lint (what AMO runs when signing)
 | `src/confluence/client.ts` | REST v2 client (same-origin session, API token fallback, 429 backoff) |
 | `src/confluence/dom.ts` | DOM ⇄ ADF offset mapping via `data-renderer-start-pos` and a per-block text diff |
 | `src/confluence/publish.ts` | Publish gate, sequential submit, duplicate detection after uncertain failures |
+| `src/confluence/comments.ts` | After publishing: resolution and replies, editing and unpublishing a comment |
+| `src/core/search.ts` | Sidebar search: query parsing, filters, snippets |
+| `src/sync/` | Sync through a Confluence page: merge rules, page format, service |
 | `src/content/` | Content script: page lifecycle, highlights (CSS Custom Highlight API), in-page UI |
 | `entrypoints/sidepanel/` | Sidebar (Preact) |
-| `entrypoints/background.ts` | Context menu, keyboard command, toolbar badge |
+| `entrypoints/background.ts` | Context menu, keyboard command, toolbar badge, purging old tombstones |
 
 ## Installing permanently
 
@@ -143,4 +167,4 @@ Firefox marks the add-on as unverified but keeps it across restarts.
 
 ### Keeping your notes
 
-Notes live in the add-on's `storage.local`, which is tied to the add-on ID `margin-notes@s-baeumer.de`. Keep that ID unchanged in `wxt.config.ts`, or Firefox treats the build as a different add-on and your notes are not visible to it. Uninstalling the add-on deletes its storage, so export your notes from the sidebar (**Settings** > **Export JSON**) before uninstalling or switching between options.
+Notes live in the add-on's `storage.local`, which is tied to the add-on ID `margin-notes@s-baeumer.de`. Keep that ID unchanged in `wxt.config.ts`, or Firefox treats the build as a different add-on and your notes are not visible to it. Uninstalling the add-on deletes its storage, so export your notes from the sidebar (**Settings** > **Export JSON**) before uninstalling or switching between options. With sync on, setting it up again after a reinstall brings the notes back from the sync page.

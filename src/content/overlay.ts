@@ -2,8 +2,9 @@
 // React tree: the "Add note" button, the note popover, the draft comments
 // banner and the submit dialog.
 
-import type { Note, NoteState } from '../core/model';
+import { threadLabel, type Note, type NoteState } from '../core/model';
 import { adfToFragment } from '../core/rich-text';
+import { unpublishQuestion } from '../confluence/comments';
 import { createEditor, EDITOR_CSS, type Editor } from '../ui/editor';
 
 declare const __E2E__: boolean;
@@ -43,6 +44,12 @@ button.b { cursor: pointer; border: 1px solid var(--mn-border); background: var(
 button.b:hover:not(:disabled) { background: var(--mn-hover); }
 button.b.primary { background: var(--mn-primary); color: var(--mn-primary-fg); border-color: var(--mn-primary); }
 button.b.danger { color: var(--mn-danger); }
+button.b.primary.danger { background: var(--mn-danger); border-color: var(--mn-danger); color: #fff; }
+button.x { all: unset; cursor: pointer; width: 22px; height: 22px; border-radius: 6px; display: inline-flex; align-items: center;
+  justify-content: center; color: var(--mn-muted); font: 18px/1 system-ui, sans-serif; }
+button.x:hover { background: var(--mn-hover); color: var(--mn-fg); }
+.ask { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.ask .q { flex: 1; min-width: 160px; font-size: 12.5px; color: var(--mn-warn); }
 button.b:disabled { opacity: 0.45; cursor: not-allowed; }
 .head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
 .state { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--mn-muted); }
@@ -67,6 +74,8 @@ textarea { width: 100%; min-height: 70px; resize: vertical; border: 1px solid va
   background: var(--mn-input-bg); color: var(--mn-fg); font: 14px/1.4 system-ui, sans-serif; }
 label.lbl { font-size: 12.5px; font-weight: 600; }
 .status-line { font-size: 12px; }
+.thread { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--mn-border); padding-top: 8px; max-height: 180px; overflow: auto; }
+.reply { font-size: 12.5px; } .reply .who { font-weight: 600; } .reply .when { color: var(--mn-muted); font-size: 11.5px; }
 ${EDITOR_CSS}
 `;
 
@@ -90,6 +99,10 @@ export interface PopoverEdit {
   onState(state: Exclude<NoteState, 'published'>): void;
   onPublish(): void;
   onDelete(): void;
+  /** Published notes: replace the comment text in Confluence. Resolves to an error message or null. */
+  onEditPublished(body: ReturnType<Editor['getDoc']>): Promise<string | null>;
+  /** Published notes: delete the comment in Confluence. Resolves to an error message or null. */
+  onUnpublish(): Promise<string | null>;
 }
 
 export interface DialogItem {
@@ -116,6 +129,10 @@ function h<K extends keyof HTMLElementTagNameMap>(
   for (const c of children) if (c !== null && c !== false) el.append(c);
   return el;
 }
+
+/** Matches the suggested keys in wxt.config.ts (Option shortcuts type characters on many Mac layouts). */
+const IS_MAC = /Mac/.test(navigator.platform);
+const ADD_NOTE_KEY = IS_MAC ? 'Ctrl+Shift+M' : 'Alt+Shift+M';
 
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
@@ -166,7 +183,7 @@ export class Overlay {
     const btn = h(
       this.doc,
       'button',
-      { title: 'Add a private note or draft comment (Alt+Shift+M)', onclick: onClick },
+      { title: `Add a private note or draft comment (${ADD_NOTE_KEY})`, onclick: onClick },
       h(this.doc, 'span', { class: 'dot private' }),
       'Add note',
     );
@@ -204,6 +221,7 @@ export class Overlay {
       d,
       'div',
       { class: 'card popover', role: 'dialog', 'aria-label': 'New note' },
+      h(d, 'div', { class: 'head' }, 'New note', h(d, 'span', { class: 'spacer' }), this.closeX()),
       h(d, 'div', { class: 'quote' }, truncate(p.quote, 240)),
       editor.el,
       emptyHint,
@@ -263,9 +281,19 @@ export class Overlay {
       d,
       'div',
       { class: 'card popover', role: 'dialog', 'aria-label': stateLabel },
-      h(d, 'div', { class: 'head' }, h(d, 'span', { class: `dot ${n.state}` }), stateLabel, h(d, 'span', { class: 'spacer' }), h(d, 'span', { class: 'state' }, n.anchorStatus)),
+      h(
+        d,
+        'div',
+        { class: 'head' },
+        h(d, 'span', { class: `dot ${n.state}` }),
+        stateLabel,
+        h(d, 'span', { class: 'spacer' }),
+        h(d, 'span', { class: 'state' }, n.anchorStatus),
+        this.closeX(),
+      ),
       h(d, 'div', { class: 'quote' }, truncate(n.target.exact, 240)),
       p.statusText ? h(d, 'div', { class: 'hint warn' }, p.statusText) : null,
+      n.published?.thread ? h(d, 'div', { class: 'hint' }, threadLabel(n.published.thread)) : null,
       n.lastError ? h(d, 'div', { class: 'hint err' }, n.lastError) : null,
       editor ? editor.el : h(d, 'div', { class: 'body' }, adfToFragment(n.body, d)),
       editable
@@ -273,7 +301,11 @@ export class Overlay {
             d,
             'div',
             { class: 'row' },
-            h(d, 'button', { class: 'b danger', onclick: () => (confirm('Delete this note?') ? (p.onDelete(), this.closePopover()) : null) }, 'Delete'),
+            h(d, 'button', {
+              class: 'b danger',
+              onclick: (e: Event) =>
+                this.ask((e.currentTarget as HTMLElement).parentElement!, 'Delete this note?', 'Delete', () => (p.onDelete(), this.closePopover())),
+            }, 'Delete'),
             h(d, 'span', { class: 'spacer' }),
             n.state === 'private'
               ? h(d, 'button', { class: 'b', disabled: !n.publishable, title: n.unpublishableReason ?? '', onclick: () => (saveBody(), p.onState('draft'), this.closePopover()) }, 'Make draft comment')
@@ -281,14 +313,7 @@ export class Overlay {
             h(d, 'button', { class: 'b', disabled: !canPublish, title: blockedTitle, onclick: () => (saveBody(), p.onPublish(), this.closePopover()) }, 'Publish now'),
             h(d, 'button', { class: 'b primary', onclick: () => (saveBody(), this.closePopover()) }, 'Save'),
           )
-        : h(
-            d,
-            'div',
-            { class: 'row end' },
-            // Same tab: loading the comment's URL also makes Confluence render its highlight and thread.
-            n.published?.webUrl ? h(d, 'button', { class: 'b', onclick: () => location.assign(n.published!.webUrl!) }, 'Open comment') : null,
-            h(d, 'button', { class: 'b', onclick: () => this.closePopover() }, 'Close'),
-          ),
+        : this.publishedControls(p),
     );
     const saveBody = () => {
       if (editor && !editor.isEmpty()) p.onSave(editor.getDoc());
@@ -299,6 +324,109 @@ export class Overlay {
     });
     this.place(pop, p.anchorRect);
     this.popover = pop;
+  }
+
+  /** Body, replies and actions of a published note: open, edit or unpublish the comment. */
+  private publishedControls(p: PopoverEdit): HTMLElement {
+    const d = this.doc;
+    const n = p.note;
+    const wrap = h(d, 'div', { style: 'display: contents' });
+    const err = h(d, 'div', { class: 'hint err', hidden: true });
+    const showError = (msg: string | null) => {
+      err.textContent = msg ?? '';
+      err.hidden = !msg;
+    };
+    const replies = n.published?.thread?.replies ?? [];
+    const thread = replies.length
+      ? h(
+          d,
+          'div',
+          { class: 'thread' },
+          ...replies.map((r) =>
+            h(
+              d,
+              'div',
+              { class: 'reply' },
+              h(d, 'span', { class: 'who' }, r.mine ? 'You' : (r.authorName ?? 'Someone')),
+              ' ',
+              h(d, 'span', { class: 'when' }, r.createdAt ? new Date(r.createdAt).toLocaleString() : ''),
+              h(d, 'div', {}, r.text),
+            ),
+          ),
+        )
+      : null;
+    const view = () => {
+      const unpublishBtn = h(d, 'button', { class: 'b danger' }, 'Unpublish');
+      unpublishBtn.addEventListener('click', () =>
+        this.ask(unpublishBtn.parentElement!, unpublishQuestion(n), 'Unpublish', async () => {
+          unpublishBtn.disabled = true;
+          const e = await p.onUnpublish();
+          if (e) {
+            unpublishBtn.disabled = false;
+            showError(e);
+          } else this.closePopover();
+        }),
+      );
+      wrap.replaceChildren(
+        h(d, 'div', { class: 'body' }, adfToFragment(n.body, d)),
+        thread ?? '',
+        err,
+        h(
+          d,
+          'div',
+          { class: 'row' },
+          unpublishBtn,
+          h(d, 'span', { class: 'spacer' }),
+          // Same tab: loading the comment's URL also makes Confluence render its highlight and thread.
+          n.published?.webUrl ? h(d, 'button', { class: 'b', onclick: () => location.assign(n.published!.webUrl!) }, 'Open comment') : null,
+          h(d, 'button', { class: 'b', onclick: edit }, 'Edit'),
+          h(d, 'button', { class: 'b', onclick: () => this.closePopover() }, 'Close'),
+        ),
+      );
+    };
+    const edit = () => {
+      const editor = createEditor(d, n.body);
+      const saveBtn = h(d, 'button', { class: 'b primary' }, 'Update comment');
+      const save = async () => {
+        if (editor.isEmpty()) return showError('Write something first.');
+        saveBtn.disabled = true;
+        const e = await p.onEditPublished(editor.getDoc());
+        if (e) {
+          saveBtn.disabled = false;
+          showError(e);
+        } else this.closePopover();
+      };
+      saveBtn.addEventListener('click', () => void save());
+      editor.onSubmit(() => void save());
+      wrap.replaceChildren(
+        editor.el,
+        h(d, 'div', { class: 'hint' }, 'Saving changes the comment in Confluence for everyone.'),
+        err,
+        h(d, 'div', { class: 'row end' }, h(d, 'button', { class: 'b', onclick: () => (showError(null), view()) }, 'Cancel'), saveBtn),
+      );
+      editor.focus();
+    };
+    view();
+    return wrap;
+  }
+
+  /** The × in a popover's header. */
+  private closeX(): HTMLElement {
+    return h(this.doc, 'button', { class: 'x', title: 'Close (Esc)', 'aria-label': 'Close', onclick: () => this.closePopover() }, '×');
+  }
+
+  /**
+   * Asks a yes/no question in place of `row` until it is answered. Used instead
+   * of window.confirm(), which is not reliable from a content script (browser
+   * automation, for one, dismisses it on its own).
+   */
+  private ask(row: HTMLElement, question: string, yesLabel: string, onYes: () => void, danger = true): void {
+    const d = this.doc;
+    const restore = () => ask.replaceWith(row);
+    const yes = h(d, 'button', { class: `b primary${danger ? ' danger' : ''}`, onclick: () => (restore(), onYes()) }, yesLabel);
+    const ask = h(d, 'div', { class: `ask ${row.className}` }, h(d, 'span', { class: 'q' }, question), h(d, 'button', { class: 'b', onclick: restore }, 'Cancel'), yes);
+    row.replaceWith(ask);
+    yes.focus();
   }
 
   closePopover(): void {
@@ -317,7 +445,12 @@ export class Overlay {
       { class: 'card banner', role: 'status' },
       h(d, 'span', { class: 'dot draft' }),
       h(d, 'span', {}, 'Draft comments: ', h(d, 'strong', {}, String(pending)), ' pending'),
-      h(d, 'button', { class: 'b', title: 'Turn all draft comments back into private notes', onclick: onDiscard }, 'Discard'),
+      h(d, 'button', {
+        class: 'b',
+        title: 'Turn all draft comments back into private notes',
+        onclick: () =>
+          this.ask(this.banner!, `Turn ${pending} draft comment${pending === 1 ? '' : 's'} back into private notes? Nothing is deleted.`, 'Discard', onDiscard, false),
+      }, 'Discard'),
       h(d, 'button', { class: 'b primary', onclick: onSubmit }, `Submit ${pending}`),
     );
     this.wrap.append(this.banner);

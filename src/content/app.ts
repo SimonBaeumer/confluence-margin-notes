@@ -3,13 +3,15 @@
 import { browser } from 'wxt/browser';
 import { buildIndex, computeMatch, type PageTextIndex } from '../core/adf-text';
 import { anchor, describe, rebase, type AnchorResult } from '../core/anchoring';
-import { pageKeyFor, SETTINGS_KEY, type PageInfo, type Settings, type ToContent } from '../core/messages';
+import { pageKeyFor, SETTINGS_KEY, type ActionResult, type PageInfo, type Settings, type ToContent } from '../core/messages';
 import { SCHEMA_VERSION, nowIso, type AdfDoc, type Note, type PageRef } from '../core/model';
 import { plainToAdf } from '../core/rich-text';
 import { isNoteKey, isSessionKey, NoteStore } from '../core/store';
 import { ConfluenceClient } from '../confluence/client';
 import { DomMapper, findCommentMark, findRoot, readPageMeta, type PageMeta } from '../confluence/dom';
+import { editPublished, markThreadSeen, refreshThread, unpublish } from '../confluence/comments';
 import { gateFor, indexForVersion, publishNote, submitDrafts, type PublishHooks } from '../confluence/publish';
+import { readSyncConfig, SYNC_CONFIG_KEY, SyncService } from '../sync/service';
 import { Highlighter, type Painted } from './highlights';
 import { Overlay, type DialogItem, type SubmitDialog } from './overlay';
 
@@ -17,6 +19,13 @@ const POLL_MS = 700;
 const MUTATION_DEBOUNCE_MS = 350;
 const JUMP_ATTEMPTS = 12;
 const JUMP_RETRY_MS = 250;
+const SYNC_FIRST_MS = 3000;
+const SYNC_INTERVAL_MS = 5 * 60 * 1000;
+const SYNC_DEBOUNCE_MS = 10 * 1000;
+/** A published note's thread is read again at most this often per tab. */
+const THREAD_TTL_MS = 2 * 60 * 1000;
+const THREAD_SWEEP_MS = 10 * 60 * 1000;
+const THREAD_SWEEP_MAX = 25;
 
 function uuid(): string {
   return crypto.randomUUID();
@@ -70,14 +79,24 @@ export class App {
   private mutationTimer: number | undefined;
   private unavailable: string | null = null;
   private publishing = false;
+  private readonly sync = new SyncService(this.client, this.store, browser.storage.local);
+  private syncEnabled = false;
+  private syncTimer: number | undefined;
+  private threadCheckedAt = new Map<string, number>();
 
   start(): void {
     setInterval(() => this.tick(), POLL_MS);
     this.tick();
     browser.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local') return;
-      if (Object.keys(changes).some((k) => isNoteKey(k) || isSessionKey(k))) void this.refreshNotes();
+      const keys = Object.keys(changes);
+      if (keys.some((k) => isNoteKey(k) || isSessionKey(k))) void this.refreshNotes();
+      if (keys.some(isNoteKey)) this.scheduleSync(SYNC_DEBOUNCE_MS);
+      if (keys.includes(SYNC_CONFIG_KEY)) void this.initSync();
     });
+    void this.initSync();
+    setInterval(() => this.scheduleSync(0), SYNC_INTERVAL_MS);
+    setInterval(() => void this.sweepThreads(), THREAD_SWEEP_MS);
     browser.runtime.onMessage.addListener((msg: ToContent) => this.onMessage(msg));
     document.addEventListener('mouseup', (e) => this.onMouseUp(e), true);
     document.addEventListener('keyup', (e) => {
@@ -155,6 +174,7 @@ export class App {
       this.pageRef.title = snap.title || meta.title;
       this.rebuildMapper();
       await this.refreshNotes();
+      void this.refreshThreads(this.notes.filter((n) => n.state === 'published'));
     } catch (e) {
       // A load the page has moved on from must not report into the next one.
       if (this.meta !== meta) return;
@@ -269,8 +289,7 @@ export class App {
 
   private async discard(): Promise<void> {
     if (!this.pageRef) return;
-    const n = this.drafts().length;
-    if (!confirm(`Turn ${n} draft comment${n === 1 ? '' : 's'} back into private notes? Nothing is deleted.`)) return;
+    // The banner asked for confirmation already.
     await this.store.discardSession(this.pageRef.key);
   }
 
@@ -382,7 +401,12 @@ export class App {
       },
       onPublish: () => void this.publishOne(id),
       onDelete: () => void this.store.delete(id),
+      onEditPublished: (body) => this.editPublishedNote(id, body),
+      onUnpublish: () => this.unpublishNote(id),
     });
+    // Opening a published note shows its replies, so they count as read.
+    const seen = markThreadSeen(note);
+    if (seen) void this.store.update(id, { published: seen.published });
   }
 
   /** Confluence's highlight of a published note, if it is on this page. */
@@ -456,6 +480,111 @@ export class App {
     });
     document.getSelection()?.removeAllRanges();
     return null;
+  }
+
+  // ---- sync -------------------------------------------------------------------
+
+  /** Sync runs only in tabs of the site the sync page is on. */
+  private async initSync(): Promise<void> {
+    const config = await readSyncConfig(browser.storage.local);
+    const enabled = config?.host === location.host;
+    if (enabled && !this.syncEnabled) this.scheduleSync(SYNC_FIRST_MS);
+    this.syncEnabled = enabled;
+  }
+
+  private scheduleSync(delay: number): void {
+    if (!this.syncEnabled) return;
+    clearTimeout(this.syncTimer);
+    this.syncTimer = window.setTimeout(() => {
+      // The service records the error in its state, where the sidebar shows it.
+      this.sync.run().catch((e) => console.warn('[margin-notes] sync failed:', (e as Error).message));
+    }, delay);
+  }
+
+  private async setupSync(): Promise<string | null> {
+    try {
+      await this.sync.setup(location.host);
+      this.syncEnabled = true;
+      return null;
+    } catch (e) {
+      return (e as Error).message;
+    }
+  }
+
+  private async syncNow(): Promise<string | null> {
+    if (!this.syncEnabled) return 'Sync is set up for another site. Open a page there to sync.';
+    clearTimeout(this.syncTimer);
+    try {
+      await this.sync.run();
+      return null;
+    } catch (e) {
+      return (e as Error).message;
+    }
+  }
+
+  // ---- published comments -------------------------------------------------------
+
+  /** Reads resolution and replies of published notes back from Confluence. */
+  private async refreshThreads(notes: Note[], force = false): Promise<string | null> {
+    let error: string | null = null;
+    for (const n of notes) {
+      if (n.state !== 'published' || n.page.site !== location.host) continue;
+      if (!force && Date.now() - (this.threadCheckedAt.get(n.id) ?? 0) < THREAD_TTL_MS) continue;
+      this.threadCheckedAt.set(n.id, Date.now());
+      try {
+        const updated = await refreshThread(this.client, n);
+        if (updated) {
+          // Save on top of the latest copy, the note may have been edited meanwhile.
+          const cur = await this.store.get(n.id);
+          if (cur?.state === 'published' && cur.published?.commentId === n.published?.commentId) {
+            await this.store.update(n.id, { published: updated.published });
+          }
+        }
+      } catch (e) {
+        error = (e as Error).message;
+        console.warn('[margin-notes] could not read comment', n.published?.commentId, error);
+      }
+    }
+    return error;
+  }
+
+  /** Every so often, published notes on other pages of this site are checked too. */
+  private async sweepThreads(): Promise<void> {
+    if (document.hidden) return;
+    const all = (await this.store.allNotes()).filter(
+      (n) => n.state === 'published' && n.page.site === location.host && n.published?.thread?.resolution !== 'deleted',
+    );
+    all.sort((a, b) => (this.threadCheckedAt.get(a.id) ?? 0) - (this.threadCheckedAt.get(b.id) ?? 0));
+    await this.refreshThreads(all.slice(0, THREAD_SWEEP_MAX));
+  }
+
+  private async editPublishedNote(id: string, body: AdfDoc): Promise<string | null> {
+    const n = await this.store.get(id);
+    if (!n) return 'Note not found.';
+    if (n.page.site !== location.host) return `Open a page on ${n.page.site} to edit this comment.`;
+    try {
+      const updated = await editPublished(this.client, n, body);
+      await this.store.put(updated);
+      return null;
+    } catch (e) {
+      const msg = `Could not update the comment: ${(e as Error).message}`;
+      await this.store.update(id, { lastError: msg });
+      return msg;
+    }
+  }
+
+  private async unpublishNote(id: string): Promise<string | null> {
+    const n = await this.store.get(id);
+    if (!n) return 'Note not found.';
+    if (n.page.site !== location.host) return `Open a page on ${n.page.site} to unpublish this comment.`;
+    try {
+      await this.store.put(await unpublish(this.client, n));
+      return null;
+    } catch (e) {
+      const msg = `Could not delete the comment: ${(e as Error).message}`;
+      await this.store.update(id, { lastError: msg });
+      return msg;
+    }
   }
 
   // ---- publishing -------------------------------------------------------------
@@ -607,6 +736,18 @@ export class App {
         return true;
       case 'reattach':
         return { error: await this.reattach(msg.noteId) };
+      case 'edit-published':
+        return { error: await this.editPublishedNote(msg.noteId, msg.body) } satisfies ActionResult;
+      case 'unpublish':
+        return { error: await this.unpublishNote(msg.noteId) } satisfies ActionResult;
+      case 'refresh-threads': {
+        const published = (await this.store.allNotes()).filter((n) => n.state === 'published' && n.page.site === location.host);
+        return { error: await this.refreshThreads(published, true) } satisfies ActionResult;
+      }
+      case 'sync-setup':
+        return { error: await this.setupSync() } satisfies ActionResult;
+      case 'sync-now':
+        return { error: await this.syncNow() } satisfies ActionResult;
     }
   }
 }

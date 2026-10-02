@@ -55,11 +55,36 @@ export interface Target {
   originalVersion: number;
 }
 
+/** Confluence's resolution status of an inline comment, plus "deleted" when it is gone. */
+export type CommentResolution = 'open' | 'reopened' | 'resolved' | 'dangling' | 'deleted';
+
+export interface CommentReply {
+  id: string;
+  authorId: string | null;
+  authorName: string | null;
+  createdAt: string | null;
+  text: string;
+  /** Written by the author of the comment (you). */
+  mine: boolean;
+}
+
+/** What happened to a published comment in Confluence, read back on page loads. */
+export interface CommentThread {
+  resolution: CommentResolution;
+  replies: CommentReply[];
+  /** When the resolution or the replies last changed. */
+  changedAt: string;
+  /** Replies created up to this time count as read. */
+  seenAt: string | null;
+}
+
 export interface PublishInfo {
   commentId: string;
   inlineMarkerRef: string | null;
   webUrl: string | null;
   publishedAt: string;
+  /** Absent until the comment was checked once. */
+  thread?: CommentThread | null;
 }
 
 export interface Note {
@@ -96,4 +121,25 @@ export function nowIso(): string {
 
 export function emptyDoc(): AdfDoc {
   return { type: 'doc', version: 1, content: [] };
+}
+
+const RESOLUTION_LABEL: Record<CommentResolution, string> = {
+  open: 'Open',
+  reopened: 'Reopened',
+  resolved: 'Resolved',
+  dangling: 'Text removed from the page',
+  deleted: 'Deleted in Confluence',
+};
+
+/** One line on what happened to a published comment, e.g. "Resolved, 2 replies". */
+export function threadLabel(t: CommentThread): string {
+  const n = t.replies.length;
+  return `${RESOLUTION_LABEL[t.resolution]}, ${n ? `${n} repl${n === 1 ? 'y' : 'ies'}` : 'no replies'}`;
+}
+
+/** Replies by other people that arrived after the note was last looked at. */
+export function unreadReplies(note: Note): CommentReply[] {
+  const t = note.published?.thread;
+  if (!t) return [];
+  return t.replies.filter((r) => (!t.seenAt || (r.createdAt ?? '') > t.seenAt) && !r.mine);
 }
