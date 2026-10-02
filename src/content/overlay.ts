@@ -44,6 +44,12 @@ button.b { cursor: pointer; border: 1px solid var(--mn-border); background: var(
 button.b:hover:not(:disabled) { background: var(--mn-hover); }
 button.b.primary { background: var(--mn-primary); color: var(--mn-primary-fg); border-color: var(--mn-primary); }
 button.b.danger { color: var(--mn-danger); }
+button.b.primary.danger { background: var(--mn-danger); border-color: var(--mn-danger); color: #fff; }
+button.x { all: unset; cursor: pointer; width: 22px; height: 22px; border-radius: 6px; display: inline-flex; align-items: center;
+  justify-content: center; color: var(--mn-muted); font: 18px/1 system-ui, sans-serif; }
+button.x:hover { background: var(--mn-hover); color: var(--mn-fg); }
+.ask { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.ask .q { flex: 1; min-width: 160px; font-size: 12.5px; color: var(--mn-warn); }
 button.b:disabled { opacity: 0.45; cursor: not-allowed; }
 .head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
 .state { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--mn-muted); }
@@ -124,6 +130,10 @@ function h<K extends keyof HTMLElementTagNameMap>(
   return el;
 }
 
+/** Matches the suggested keys in wxt.config.ts (Option shortcuts type characters on many Mac layouts). */
+const IS_MAC = /Mac/.test(navigator.platform);
+const ADD_NOTE_KEY = IS_MAC ? 'Ctrl+Shift+M' : 'Alt+Shift+M';
+
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
 }
@@ -173,7 +183,7 @@ export class Overlay {
     const btn = h(
       this.doc,
       'button',
-      { title: 'Add a private note or draft comment (Alt+Shift+M)', onclick: onClick },
+      { title: `Add a private note or draft comment (${ADD_NOTE_KEY})`, onclick: onClick },
       h(this.doc, 'span', { class: 'dot private' }),
       'Add note',
     );
@@ -211,6 +221,7 @@ export class Overlay {
       d,
       'div',
       { class: 'card popover', role: 'dialog', 'aria-label': 'New note' },
+      h(d, 'div', { class: 'head' }, 'New note', h(d, 'span', { class: 'spacer' }), this.closeX()),
       h(d, 'div', { class: 'quote' }, truncate(p.quote, 240)),
       editor.el,
       emptyHint,
@@ -270,7 +281,16 @@ export class Overlay {
       d,
       'div',
       { class: 'card popover', role: 'dialog', 'aria-label': stateLabel },
-      h(d, 'div', { class: 'head' }, h(d, 'span', { class: `dot ${n.state}` }), stateLabel, h(d, 'span', { class: 'spacer' }), h(d, 'span', { class: 'state' }, n.anchorStatus)),
+      h(
+        d,
+        'div',
+        { class: 'head' },
+        h(d, 'span', { class: `dot ${n.state}` }),
+        stateLabel,
+        h(d, 'span', { class: 'spacer' }),
+        h(d, 'span', { class: 'state' }, n.anchorStatus),
+        this.closeX(),
+      ),
       h(d, 'div', { class: 'quote' }, truncate(n.target.exact, 240)),
       p.statusText ? h(d, 'div', { class: 'hint warn' }, p.statusText) : null,
       n.published?.thread ? h(d, 'div', { class: 'hint' }, threadLabel(n.published.thread)) : null,
@@ -281,7 +301,11 @@ export class Overlay {
             d,
             'div',
             { class: 'row' },
-            h(d, 'button', { class: 'b danger', onclick: () => (confirm('Delete this note?') ? (p.onDelete(), this.closePopover()) : null) }, 'Delete'),
+            h(d, 'button', {
+              class: 'b danger',
+              onclick: (e: Event) =>
+                this.ask((e.currentTarget as HTMLElement).parentElement!, 'Delete this note?', 'Delete', () => (p.onDelete(), this.closePopover())),
+            }, 'Delete'),
             h(d, 'span', { class: 'spacer' }),
             n.state === 'private'
               ? h(d, 'button', { class: 'b', disabled: !n.publishable, title: n.unpublishableReason ?? '', onclick: () => (saveBody(), p.onState('draft'), this.closePopover()) }, 'Make draft comment')
@@ -333,15 +357,16 @@ export class Overlay {
       : null;
     const view = () => {
       const unpublishBtn = h(d, 'button', { class: 'b danger' }, 'Unpublish');
-      unpublishBtn.addEventListener('click', async () => {
-        if (!confirm(unpublishQuestion(n))) return;
-        unpublishBtn.disabled = true;
-        const e = await p.onUnpublish();
-        if (e) {
-          unpublishBtn.disabled = false;
-          showError(e);
-        } else this.closePopover();
-      });
+      unpublishBtn.addEventListener('click', () =>
+        this.ask(unpublishBtn.parentElement!, unpublishQuestion(n), 'Unpublish', async () => {
+          unpublishBtn.disabled = true;
+          const e = await p.onUnpublish();
+          if (e) {
+            unpublishBtn.disabled = false;
+            showError(e);
+          } else this.closePopover();
+        }),
+      );
       wrap.replaceChildren(
         h(d, 'div', { class: 'body' }, adfToFragment(n.body, d)),
         thread ?? '',
@@ -385,6 +410,25 @@ export class Overlay {
     return wrap;
   }
 
+  /** The × in a popover's header. */
+  private closeX(): HTMLElement {
+    return h(this.doc, 'button', { class: 'x', title: 'Close (Esc)', 'aria-label': 'Close', onclick: () => this.closePopover() }, '×');
+  }
+
+  /**
+   * Asks a yes/no question in place of `row` until it is answered. Used instead
+   * of window.confirm(), which is not reliable from a content script (browser
+   * automation, for one, dismisses it on its own).
+   */
+  private ask(row: HTMLElement, question: string, yesLabel: string, onYes: () => void, danger = true): void {
+    const d = this.doc;
+    const restore = () => ask.replaceWith(row);
+    const yes = h(d, 'button', { class: `b primary${danger ? ' danger' : ''}`, onclick: () => (restore(), onYes()) }, yesLabel);
+    const ask = h(d, 'div', { class: `ask ${row.className}` }, h(d, 'span', { class: 'q' }, question), h(d, 'button', { class: 'b', onclick: restore }, 'Cancel'), yes);
+    row.replaceWith(ask);
+    yes.focus();
+  }
+
   closePopover(): void {
     this.popover?.remove();
     this.popover = null;
@@ -401,7 +445,12 @@ export class Overlay {
       { class: 'card banner', role: 'status' },
       h(d, 'span', { class: 'dot draft' }),
       h(d, 'span', {}, 'Draft comments: ', h(d, 'strong', {}, String(pending)), ' pending'),
-      h(d, 'button', { class: 'b', title: 'Turn all draft comments back into private notes', onclick: onDiscard }, 'Discard'),
+      h(d, 'button', {
+        class: 'b',
+        title: 'Turn all draft comments back into private notes',
+        onclick: () =>
+          this.ask(this.banner!, `Turn ${pending} draft comment${pending === 1 ? '' : 's'} back into private notes? Nothing is deleted.`, 'Discard', onDiscard, false),
+      }, 'Discard'),
       h(d, 'button', { class: 'b primary', onclick: onSubmit }, `Submit ${pending}`),
     );
     this.wrap.append(this.banner);

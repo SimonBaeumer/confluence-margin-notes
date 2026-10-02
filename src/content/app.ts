@@ -289,8 +289,7 @@ export class App {
 
   private async discard(): Promise<void> {
     if (!this.pageRef) return;
-    const n = this.drafts().length;
-    if (!confirm(`Turn ${n} draft comment${n === 1 ? '' : 's'} back into private notes? Nothing is deleted.`)) return;
+    // The banner asked for confirmation already.
     await this.store.discardSession(this.pageRef.key);
   }
 

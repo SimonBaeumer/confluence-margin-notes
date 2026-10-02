@@ -40,13 +40,14 @@ Firefox does not grant host permissions to Manifest V3 add-ons at install time. 
 
 ## Using it
 
-- **Select text** on a Confluence page (view mode), then click **Add note** (or press `Alt+Shift+M`, or use the context menu). Write the note and choose:
+- **Select text** on a Confluence page (view mode), then click **Add note** (or press `Alt+Shift+M`, `Ctrl+Shift+M` on a Mac, or use the context menu). Write the note and choose:
   - **Keep private**: yellow highlight, never published.
   - **Add draft comment**: blue highlight, collected for the next submit.
   - **Publish now**: posted as an inline comment right away.
+- Shortcuts can be changed in `about:addons` > gear icon > **Manage Extension Shortcuts**.
 - **Click a highlight** to edit the note, switch it between private and draft, publish it, or delete it.
 - The **Draft comments** pill at the bottom right shows how many drafts are pending. **Submit** opens a dialog with every draft in document order and an optional summary (posted as a page comment after the inline comments). **Discard** turns all drafts back into private notes; nothing is deleted.
-- The **sidebar** (toolbar button or `Alt+Shift+N`) lists the notes on the current page with filters, shows notes that need attention (text changed, ambiguous, orphaned), lets you re-attach them to a new selection, and has an **All notes** view across pages plus JSON export/import.
+- The **sidebar** (toolbar button, or `Alt+Shift+N`, `Ctrl+Shift+N` on a Mac) lists the notes on the current page with filters, shows notes that need attention (text changed, ambiguous, orphaned), lets you re-attach them to a new selection, and has an **All notes** view across pages plus JSON export/import.
 - **Search** in the sidebar (on the page view and in **All notes**): every word and `"quoted phrase"` must appear in the note, its quote, the page title or a reply. Case and accents are ignored. Filters: `is:private`, `is:draft`, `is:published`, `is:resolved`, `is:open`, `is:deleted`, `is:unread`, `has:replies`, `is:attention`. For example `solver is:draft`.
 
 ### After publishing
