@@ -51,12 +51,6 @@ export async function purgeLocal(area: StorageAreaLike, store: NoteStore, now = 
   return store.purgeDeleted(localPurgeCutoff(now, !!config, state?.lastSyncAt ?? null));
 }
 
-/** Runs `fn` while holding a lock shared by all tabs of the site, if the browser has Web Locks. */
-async function withLock<T>(fn: () => Promise<T>): Promise<T> {
-  const locks = (globalThis.navigator as Navigator | undefined)?.locks;
-  return locks ? locks.request('margin-notes-sync', fn) : fn();
-}
-
 export class SyncService {
   private running: Promise<SyncState> | null = null;
   private restrictionCheckedAt = 0;
@@ -107,9 +101,14 @@ export class SyncService {
     }
   }
 
-  /** Runs one sync. Concurrent calls share the run in progress. */
+  /**
+   * Runs one sync. Concurrent calls in this tab share the run in progress;
+   * runs in other tabs or on other machines are caught by the page version
+   * check. (No Web Locks: in a Firefox content script they belong to the page
+   * and their promises cannot be awaited.)
+   */
   run(): Promise<SyncState> {
-    this.running ??= withLock(() => this.runOnce()).finally(() => (this.running = null));
+    this.running ??= this.runOnce().finally(() => (this.running = null));
     return this.running;
   }
 

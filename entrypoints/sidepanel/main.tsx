@@ -8,7 +8,7 @@ import { adfToFragment } from '../../src/core/rich-text';
 import type { AdfDoc } from '../../src/core/model';
 import { isEmptyQuery, matches, parseQuery, SEARCH_HELP, snippet, type Query } from '../../src/core/search';
 import { NoteStore, type ExportFile } from '../../src/core/store';
-import { markThreadSeen } from '../../src/confluence/comments';
+import { markThreadSeen, unpublishQuestion } from '../../src/confluence/comments';
 import { readSyncConfig, readSyncState, SYNC_CONFIG_KEY, SYNC_STATE_KEY, type SyncConfig, type SyncState } from '../../src/sync/service';
 import { createEditor, EDITOR_CSS, type Editor } from '../../src/ui/editor';
 import './style.css';
@@ -214,9 +214,7 @@ function NoteCard({ note, onPage }: { note: Note; onPage: boolean }) {
     else setMsg('Could not find this note on the page.');
   };
   const unpublishIt = async () => {
-    const n = note.published?.thread?.replies.length ?? 0;
-    const extra = n ? ` and its ${n} repl${n === 1 ? 'y' : 'ies'}` : '';
-    if (!confirm(`Delete this comment${extra} in Confluence? The note stays as a private note.`)) return;
+    if (!confirm(unpublishQuestion(note))) return;
     setMsg(await act({ type: 'unpublish', noteId: note.id }, note.page.site));
   };
   const changed = note.state !== 'published' && note.target.exact !== note.target.originalExact;

@@ -52,7 +52,7 @@ Firefox does not grant host permissions to Manifest V3 add-ons at install time. 
 ### After publishing
 
 - A published note shows what happened to its comment in Confluence: **open**, **resolved**, **reopened**, **text removed from the page** or **deleted**, plus its replies. Comments are re-read when you open their page (at most every 2 minutes) and, every 10 minutes, for up to 25 published notes on other pages of the same site. Replies by others that you have not seen yet are marked **new**, and **All notes** shows how many notes have new replies. Opening the note, jumping to the comment or **Mark read** clears them.
-- **Edit comment** changes the comment's text in Confluence. **Unpublish** deletes the comment in Confluence (with its replies, after a confirmation) and keeps the note as a private note. Both work from any open page on the comment's site.
+- **Edit comment** changes the comment's text in Confluence. **Unpublish** deletes the comment in Confluence (after a confirmation) and keeps the note as a private note. Confluence does not delete replies with their comment but keeps them as separate comments, so your own replies are deleted first, and a comment with replies by other people cannot be unpublished (resolve it instead). Both work from any open page on the comment's site.
 
 ### Sync between machines
 

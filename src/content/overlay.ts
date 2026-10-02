@@ -4,6 +4,7 @@
 
 import { threadLabel, type Note, type NoteState } from '../core/model';
 import { adfToFragment } from '../core/rich-text';
+import { unpublishQuestion } from '../confluence/comments';
 import { createEditor, EDITOR_CSS, type Editor } from '../ui/editor';
 
 declare const __E2E__: boolean;
@@ -333,8 +334,7 @@ export class Overlay {
     const view = () => {
       const unpublishBtn = h(d, 'button', { class: 'b danger' }, 'Unpublish');
       unpublishBtn.addEventListener('click', async () => {
-        const extra = replies.length ? ` and its ${replies.length} repl${replies.length === 1 ? 'y' : 'ies'}` : '';
-        if (!confirm(`Delete this comment${extra} in Confluence? The note stays as a private note.`)) return;
+        if (!confirm(unpublishQuestion(n))) return;
         unpublishBtn.disabled = true;
         const e = await p.onUnpublish();
         if (e) {

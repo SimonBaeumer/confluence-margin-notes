@@ -101,16 +101,36 @@ export async function editPublished(client: ConfluenceClient, note: Note, body: 
 }
 
 /**
- * Deletes the comment in Confluence (with its replies) and turns the note back
- * into a private note. A comment that is already gone counts as success.
+ * Deletes the comment in Confluence and turns the note back into a private
+ * note. A comment that is already gone counts as success.
+ *
+ * Confluence does not delete replies with their comment: they stay behind as
+ * separate top-level comments on the page. So your own replies are deleted
+ * first, and a comment with replies by other people is not deleted at all.
  */
 export async function unpublish(client: ConfluenceClient, note: Note): Promise<Note> {
   const pub = note.published;
   if (note.state !== 'published' || !pub) throw new Error('This note is not published.');
   try {
+    const root = await client.getInlineComment(pub.commentId);
+    const replies = await client.listReplies(pub.commentId);
+    const others = replies.filter((r) => r.authorId !== root.authorId);
+    if (others.length) {
+      throw new Error(
+        `The comment has ${others.length} repl${others.length === 1 ? 'y' : 'ies'} by other people, which Confluence would keep as separate comments. Resolve it in Confluence instead.`,
+      );
+    }
+    for (const r of replies) await client.deleteInlineComment(r.id);
     await client.deleteInlineComment(pub.commentId);
   } catch (e) {
     if (!isGone(e)) throw e;
   }
   return { ...note, state: 'private', published: null, lastError: null };
+}
+
+/** The confirmation shown before unpublishing. */
+export function unpublishQuestion(note: Note): string {
+  const mine = note.published?.thread?.replies.filter((r) => r.mine).length ?? 0;
+  const extra = mine ? ` and your ${mine} repl${mine === 1 ? 'y' : 'ies'} to it` : '';
+  return `Delete this comment${extra} in Confluence? The note stays as a private note.`;
 }

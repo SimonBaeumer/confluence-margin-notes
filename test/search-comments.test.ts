@@ -65,7 +65,7 @@ describe('search', () => {
   });
 });
 
-function fakeComments(opts: { gone?: boolean } = {}) {
+function fakeComments(opts: { gone?: boolean; onlyMine?: boolean } = {}) {
   const calls: { method: string; url: string; body: any }[] = [];
   const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status });
   const fetch = async (url: string, init?: RequestInit) => {
@@ -73,17 +73,16 @@ function fakeComments(opts: { gone?: boolean } = {}) {
     calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : null });
     if (opts.gone && url.startsWith('/wiki/api/v2/inline-comments/c1')) return json({}, 404);
     if (url.startsWith('/wiki/api/v2/inline-comments/c1/children')) {
-      return json({
-        results: [
+      const results = [
           { id: 'r2', version: { authorId: 'me', createdAt: '2026-10-02T09:00:00Z' }, body: { atlas_doc_format: { value: JSON.stringify(plainToAdf('Thanks')) } } },
           { id: 'r1', version: { authorId: 'bob', createdAt: '2026-10-02T08:00:00Z' }, body: { atlas_doc_format: { value: JSON.stringify(plainToAdf('Because of X')) } } },
-        ],
-      });
+      ];
+      return json({ results: opts.onlyMine ? results.slice(0, 1) : results });
     }
     if (url.startsWith('/wiki/api/v2/inline-comments/c1') && method === 'GET') {
       return json({ id: 'c1', resolutionStatus: 'resolved', version: { number: 3, authorId: 'me' } });
     }
-    if (url.startsWith('/wiki/api/v2/inline-comments/c1')) return new Response(null, { status: method === 'DELETE' ? 204 : 200 });
+    if (url.startsWith('/wiki/api/v2/inline-comments/')) return new Response(null, { status: method === 'DELETE' ? 204 : 200 });
     if (url === '/wiki/api/v2/users-bulk') return json({ results: [{ accountId: 'bob', displayName: 'Bob' }] });
     return json({}, 404);
   };
@@ -122,10 +121,16 @@ describe('published comments', () => {
     expect(n.body).toEqual(body);
   });
 
-  it('unpublishes into a private note, also when the comment is already gone', async () => {
+  it('refuses to unpublish a comment with replies by other people', async () => {
     const { calls, client } = fakeComments();
+    await expect(unpublish(client, published())).rejects.toThrow(/1 reply by other people/);
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
+  });
+
+  it('deletes your own replies before the comment, also when the comment is already gone', async () => {
+    const { calls, client } = fakeComments({ onlyMine: true });
     const n = await unpublish(client, published());
-    expect(calls.some((c) => c.method === 'DELETE')).toBe(true);
+    expect(calls.filter((c) => c.method === 'DELETE').map((c) => c.url)).toEqual(['/wiki/api/v2/inline-comments/r2', '/wiki/api/v2/inline-comments/c1']);
     expect(n).toMatchObject({ state: 'private', published: null });
     const gone = fakeComments({ gone: true });
     expect((await unpublish(gone.client, published())).state).toBe('private');
