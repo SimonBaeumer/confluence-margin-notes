@@ -1,0 +1,32 @@
+{
+  "name": "margin-notes",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Private notes anchored to Confluence text, publishable as inline comments in one batch.",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt -b firefox --mv3",
+    "build": "wxt build -b firefox --mv3",
+    "build:chrome": "wxt build -b chrome",
+    "zip": "wxt zip -b firefox --mv3",
+    "lint:ext": "web-ext lint --source-dir .output/firefox-mv3",
+    "sign": "web-ext sign --source-dir .output/firefox-mv3 --channel unlisted --artifacts-dir web-ext-artifacts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check": "npm run typecheck && npm test",
+    "postinstall": "wxt prepare"
+  },
+  "dependencies": {
+    "approx-string-match": "^2.0.0",
+    "diff-match-patch": "^1.0.5",
+    "preact": "^10.27.0"
+  },
+  "devDependencies": {
+    "@types/diff-match-patch": "^1.0.36",
+    "happy-dom": "^20.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0",
+    "web-ext": "^10.0.0",
+    "wxt": "^0.21.0"
+  }
+}
