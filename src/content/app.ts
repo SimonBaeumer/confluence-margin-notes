@@ -98,7 +98,12 @@ export class App {
       this.meta = meta;
       this.loading = this.load(meta);
     }
-    if (root && root !== this.observedRoot) this.observe(root);
+    if (root && root !== this.observedRoot) {
+      // Confluence sometimes swaps the whole renderer root: re-map and repaint.
+      this.observe(root);
+      this.rebuildMapper();
+      this.paint();
+    }
   }
 
   private reset(): void {
@@ -246,7 +251,12 @@ export class App {
     const range = sel.getRangeAt(0);
     const root = findRoot();
     if (!root || !root.contains(range.commonAncestorContainer)) return null;
-    const offs = this.mapper.rangeToOffsets(range);
+    let offs = this.mapper.rangeToOffsets(range);
+    if (!offs) {
+      // The DOM may have been re-rendered since the last mutation batch.
+      this.rebuildMapper();
+      offs = this.mapper.rangeToOffsets(range);
+    }
     if (!offs) return null;
     if (!this.index!.text.slice(offs.start, offs.end).trim()) return null;
     return { range, ...offs };
@@ -465,6 +475,23 @@ export class App {
         }
       },
     });
+  }
+
+  /** State dump for e2e tests. */
+  debug(): unknown {
+    const sel = document.getSelection();
+    const range = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+    return {
+      key: this.lastKey,
+      unavailable: this.unavailable,
+      indexVersion: this.indexVersion,
+      blocks: this.index?.blocks.length ?? null,
+      coverage: this.mapper?.coverage ?? null,
+      popoverOpen: this.overlay.popoverOpen,
+      dialogOpen: this.overlay.dialogOpen,
+      selection: range ? { text: range.toString(), offsets: this.mapper?.rangeToOffsets(range) ?? null } : null,
+      notes: this.notes.map((n) => ({ id: n.id, state: n.state, exact: n.target.exact, result: this.results.get(n.id) })),
+    };
   }
 
   // ---- messages ---------------------------------------------------------------

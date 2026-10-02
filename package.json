@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "wxt -b firefox --mv3",
     "build": "wxt build -b firefox --mv3",
+    "build:e2e": "MN_E2E=1 wxt build -b firefox --mv3",
     "build:chrome": "wxt build -b chrome",
     "zip": "wxt zip -b firefox --mv3",
     "lint:ext": "web-ext lint --source-dir .output/firefox-mv3",

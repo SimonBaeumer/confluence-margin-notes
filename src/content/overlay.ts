@@ -6,6 +6,8 @@ import type { Note, NoteState } from '../core/model';
 import { adfToFragment } from '../core/rich-text';
 import { createEditor, EDITOR_CSS, type Editor } from '../ui/editor';
 
+declare const __E2E__: boolean;
+
 const CSS_TEXT = `
 :host { all: initial; }
 * { box-sizing: border-box; }
@@ -131,7 +133,8 @@ export class Overlay {
   constructor(private readonly doc: Document) {
     this.host = doc.createElement('margin-notes-ui');
     this.host.style.cssText = 'position: static; display: contents;';
-    this.shadow = this.host.attachShadow({ mode: 'closed' });
+    // Closed in normal builds so page scripts can't read note bodies; open for e2e tests.
+    this.shadow = this.host.attachShadow({ mode: __E2E__ ? 'open' : 'closed' });
     const style = doc.createElement('style');
     style.textContent = CSS_TEXT;
     this.wrap = h(doc, 'div', { class: 'mn' });
@@ -195,12 +198,15 @@ export class Overlay {
     const editor = createEditor(this.doc, null);
     const d = this.doc;
     const publishTitle = p.publishable ? '' : (p.unpublishableReason ?? 'Cannot be published');
+    const emptyHint = h(d, 'div', { class: 'hint err', hidden: true }, 'Write something first.');
+    editor.onChange(() => (emptyHint.hidden = true));
     const pop = h(
       d,
       'div',
       { class: 'card popover', role: 'dialog', 'aria-label': 'New note' },
       h(d, 'div', { class: 'quote' }, truncate(p.quote, 240)),
       editor.el,
+      emptyHint,
       !p.publishable ? h(d, 'div', { class: 'hint warn' }, `Private only: ${p.unpublishableReason}`) : null,
       h(
         d,
@@ -226,6 +232,7 @@ export class Overlay {
     );
     const save = (action: CreateAction) => {
       if (editor.isEmpty()) {
+        emptyHint.hidden = false;
         editor.focus();
         return;
       }

@@ -4,6 +4,7 @@ export default defineConfig({
   srcDir: '.',
   entrypointsDir: 'entrypoints',
   manifestVersion: 3,
+  vite: () => ({ define: { __E2E__: JSON.stringify(process.env.MN_E2E === '1') } }),
   manifest: {
     name: 'margin-notes',
     description: 'Private notes anchored to Confluence text, publishable as inline comments in one batch.',
