@@ -2,6 +2,8 @@
 
 A personal Firefox extension for private notes on Confluence Cloud pages, anchored to the text they're about. A note can stay private forever, or become a **draft comment** that is published as a native Confluence inline comment, either on its own (**Publish now**) or together with others in one batch (**Submit**), GitHub-review style. Nobody is notified until you publish.
 
+![margin-notes on an example Confluence page: two draft comments (blue), a private note (yellow), the edit popover and the pending drafts pill](docs/screenshot.png)
+
 Background, research and design: [idea.md](idea.md), [research.md](research.md) and the `appendix-*.md` files.
 
 ## Using it
