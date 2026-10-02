@@ -98,6 +98,32 @@ export class NoteStore {
     await this.endSession(pageKey);
   }
 
+  /**
+   * Writes notes received from sync as they are (keeping their updatedAt) and
+   * removes notes purged elsewhere. `expected` holds each note as the merge
+   * read it (see fingerprint; absent: did not exist); a note edited meanwhile
+   * is left alone and goes out with the next sync. Returns the number of notes changed.
+   */
+  async applyRemote(writes: Note[], removes: string[], expected: Map<string, string>): Promise<number> {
+    const ids = [...writes.map((n) => n.id), ...removes];
+    if (!ids.length) return 0;
+    const cur = await this.area.get(ids.map((id) => NOTE + id));
+    const unchanged = (id: string) => fingerprint(cur[NOTE + id] as Note | undefined) === (expected.get(id) ?? fingerprint(undefined));
+    const items: Record<string, unknown> = {};
+    for (const n of writes) if (unchanged(n.id)) items[NOTE + n.id] = n;
+    const gone = removes.filter((id) => unchanged(id) && cur[NOTE + id]).map((id) => NOTE + id);
+    if (Object.keys(items).length) await this.area.set(items);
+    if (gone.length) await this.area.remove(gone);
+    return Object.keys(items).length + gone.length;
+  }
+
+  /** Removes deleted notes (tombstones) whose deletion is older than `cutoff`. Returns how many. */
+  async purgeDeleted(cutoff: string): Promise<number> {
+    const old = (await this.allNotes(true)).filter((n) => n.deleted && n.updatedAt < cutoff);
+    if (old.length) await this.area.remove(old.map((n) => NOTE + n.id));
+    return old.length;
+  }
+
   async exportAll(): Promise<ExportFile> {
     return {
       format: 'margin-notes-export',
@@ -127,6 +153,11 @@ export class NoteStore {
     if (Object.keys(items).length) await this.area.set(items);
     return taken;
   }
+}
+
+/** Identifies one stored version of a note (updatedAt alone can repeat within a millisecond). */
+export function fingerprint(note: Note | undefined): string {
+  return note ? JSON.stringify(note) : '';
 }
 
 export function isNoteKey(key: string): boolean {

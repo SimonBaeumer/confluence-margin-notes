@@ -2,7 +2,7 @@
 // React tree: the "Add note" button, the note popover, the draft comments
 // banner and the submit dialog.
 
-import type { Note, NoteState } from '../core/model';
+import { threadLabel, type Note, type NoteState } from '../core/model';
 import { adfToFragment } from '../core/rich-text';
 import { createEditor, EDITOR_CSS, type Editor } from '../ui/editor';
 
@@ -67,6 +67,8 @@ textarea { width: 100%; min-height: 70px; resize: vertical; border: 1px solid va
   background: var(--mn-input-bg); color: var(--mn-fg); font: 14px/1.4 system-ui, sans-serif; }
 label.lbl { font-size: 12.5px; font-weight: 600; }
 .status-line { font-size: 12px; }
+.thread { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--mn-border); padding-top: 8px; max-height: 180px; overflow: auto; }
+.reply { font-size: 12.5px; } .reply .who { font-weight: 600; } .reply .when { color: var(--mn-muted); font-size: 11.5px; }
 ${EDITOR_CSS}
 `;
 
@@ -90,6 +92,10 @@ export interface PopoverEdit {
   onState(state: Exclude<NoteState, 'published'>): void;
   onPublish(): void;
   onDelete(): void;
+  /** Published notes: replace the comment text in Confluence. Resolves to an error message or null. */
+  onEditPublished(body: ReturnType<Editor['getDoc']>): Promise<string | null>;
+  /** Published notes: delete the comment in Confluence. Resolves to an error message or null. */
+  onUnpublish(): Promise<string | null>;
 }
 
 export interface DialogItem {
@@ -266,6 +272,7 @@ export class Overlay {
       h(d, 'div', { class: 'head' }, h(d, 'span', { class: `dot ${n.state}` }), stateLabel, h(d, 'span', { class: 'spacer' }), h(d, 'span', { class: 'state' }, n.anchorStatus)),
       h(d, 'div', { class: 'quote' }, truncate(n.target.exact, 240)),
       p.statusText ? h(d, 'div', { class: 'hint warn' }, p.statusText) : null,
+      n.published?.thread ? h(d, 'div', { class: 'hint' }, threadLabel(n.published.thread)) : null,
       n.lastError ? h(d, 'div', { class: 'hint err' }, n.lastError) : null,
       editor ? editor.el : h(d, 'div', { class: 'body' }, adfToFragment(n.body, d)),
       editable
@@ -281,14 +288,7 @@ export class Overlay {
             h(d, 'button', { class: 'b', disabled: !canPublish, title: blockedTitle, onclick: () => (saveBody(), p.onPublish(), this.closePopover()) }, 'Publish now'),
             h(d, 'button', { class: 'b primary', onclick: () => (saveBody(), this.closePopover()) }, 'Save'),
           )
-        : h(
-            d,
-            'div',
-            { class: 'row end' },
-            // Same tab: loading the comment's URL also makes Confluence render its highlight and thread.
-            n.published?.webUrl ? h(d, 'button', { class: 'b', onclick: () => location.assign(n.published!.webUrl!) }, 'Open comment') : null,
-            h(d, 'button', { class: 'b', onclick: () => this.closePopover() }, 'Close'),
-          ),
+        : this.publishedControls(p),
     );
     const saveBody = () => {
       if (editor && !editor.isEmpty()) p.onSave(editor.getDoc());
@@ -299,6 +299,90 @@ export class Overlay {
     });
     this.place(pop, p.anchorRect);
     this.popover = pop;
+  }
+
+  /** Body, replies and actions of a published note: open, edit or unpublish the comment. */
+  private publishedControls(p: PopoverEdit): HTMLElement {
+    const d = this.doc;
+    const n = p.note;
+    const wrap = h(d, 'div', { style: 'display: contents' });
+    const err = h(d, 'div', { class: 'hint err', hidden: true });
+    const showError = (msg: string | null) => {
+      err.textContent = msg ?? '';
+      err.hidden = !msg;
+    };
+    const replies = n.published?.thread?.replies ?? [];
+    const thread = replies.length
+      ? h(
+          d,
+          'div',
+          { class: 'thread' },
+          ...replies.map((r) =>
+            h(
+              d,
+              'div',
+              { class: 'reply' },
+              h(d, 'span', { class: 'who' }, r.mine ? 'You' : (r.authorName ?? 'Someone')),
+              ' ',
+              h(d, 'span', { class: 'when' }, r.createdAt ? new Date(r.createdAt).toLocaleString() : ''),
+              h(d, 'div', {}, r.text),
+            ),
+          ),
+        )
+      : null;
+    const view = () => {
+      const unpublishBtn = h(d, 'button', { class: 'b danger' }, 'Unpublish');
+      unpublishBtn.addEventListener('click', async () => {
+        const extra = replies.length ? ` and its ${replies.length} repl${replies.length === 1 ? 'y' : 'ies'}` : '';
+        if (!confirm(`Delete this comment${extra} in Confluence? The note stays as a private note.`)) return;
+        unpublishBtn.disabled = true;
+        const e = await p.onUnpublish();
+        if (e) {
+          unpublishBtn.disabled = false;
+          showError(e);
+        } else this.closePopover();
+      });
+      wrap.replaceChildren(
+        h(d, 'div', { class: 'body' }, adfToFragment(n.body, d)),
+        thread ?? '',
+        err,
+        h(
+          d,
+          'div',
+          { class: 'row' },
+          unpublishBtn,
+          h(d, 'span', { class: 'spacer' }),
+          // Same tab: loading the comment's URL also makes Confluence render its highlight and thread.
+          n.published?.webUrl ? h(d, 'button', { class: 'b', onclick: () => location.assign(n.published!.webUrl!) }, 'Open comment') : null,
+          h(d, 'button', { class: 'b', onclick: edit }, 'Edit'),
+          h(d, 'button', { class: 'b', onclick: () => this.closePopover() }, 'Close'),
+        ),
+      );
+    };
+    const edit = () => {
+      const editor = createEditor(d, n.body);
+      const saveBtn = h(d, 'button', { class: 'b primary' }, 'Update comment');
+      const save = async () => {
+        if (editor.isEmpty()) return showError('Write something first.');
+        saveBtn.disabled = true;
+        const e = await p.onEditPublished(editor.getDoc());
+        if (e) {
+          saveBtn.disabled = false;
+          showError(e);
+        } else this.closePopover();
+      };
+      saveBtn.addEventListener('click', () => void save());
+      editor.onSubmit(() => void save());
+      wrap.replaceChildren(
+        editor.el,
+        h(d, 'div', { class: 'hint' }, 'Saving changes the comment in Confluence for everyone.'),
+        err,
+        h(d, 'div', { class: 'row end' }, h(d, 'button', { class: 'b', onclick: () => (showError(null), view()) }, 'Cancel'), saveBtn),
+      );
+      editor.focus();
+    };
+    view();
+    return wrap;
   }
 
   closePopover(): void {

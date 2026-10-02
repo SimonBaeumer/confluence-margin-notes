@@ -48,6 +48,23 @@ export interface ExistingInlineComment {
   createdAt: string | null;
   bodyText: string;
   webUrl: string | null;
+  resolutionStatus: string | null;
+  version: number | null;
+}
+
+export interface CurrentUser {
+  accountId: string;
+  displayName: string;
+  personalSpace: { id: string; key: string } | null;
+}
+
+export interface StoragePage {
+  id: string;
+  title: string;
+  version: number;
+  /** Storage format (XHTML) body. */
+  value: string;
+  webUrl: string | null;
 }
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -168,6 +185,131 @@ export class ConfluenceClient {
     }
     return out;
   }
+
+  /** Replies to an inline comment, oldest first. */
+  async listReplies(commentId: string): Promise<ExistingInlineComment[]> {
+    const out: ExistingInlineComment[] = [];
+    let next: string | null =
+      `/wiki/api/v2/inline-comments/${encodeURIComponent(commentId)}/children?body-format=atlas_doc_format&limit=100`;
+    while (next) {
+      const res = await this.request(next);
+      const j = await res.json();
+      for (const c of j.results ?? []) out.push(toExisting(c));
+      const link: string | undefined = j._links?.next;
+      next = link ? (link.startsWith('/wiki') ? link : '/wiki' + link) : null;
+    }
+    return out.sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''));
+  }
+
+  /** Replaces the body of an inline comment. `version` is the comment's current version number. */
+  async updateInlineComment(commentId: string, version: number, body: AdfDoc): Promise<void> {
+    await this.request(`/wiki/api/v2/inline-comments/${encodeURIComponent(commentId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        version: { number: version + 1 },
+        body: { representation: 'atlas_doc_format', value: JSON.stringify(body) },
+      }),
+    });
+  }
+
+  /** Permanently deletes an inline comment. */
+  async deleteInlineComment(commentId: string): Promise<void> {
+    await this.request(`/wiki/api/v2/inline-comments/${encodeURIComponent(commentId)}`, { method: 'DELETE' });
+  }
+
+  /** Display names by account id. Unknown ids are left out. */
+  async displayNames(accountIds: string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (!accountIds.length) return out;
+    const res = await this.request('/wiki/api/v2/users-bulk', { method: 'POST', body: JSON.stringify({ accountIds }) });
+    const j = await res.json();
+    for (const u of j.results ?? []) {
+      const name = u.displayName || u.publicName;
+      if (u.accountId && name) out.set(String(u.accountId), String(name));
+    }
+    return out;
+  }
+
+  async currentUser(): Promise<CurrentUser> {
+    const res = await this.request('/wiki/rest/api/user/current?expand=personalSpace');
+    const j = await res.json();
+    const ps = j.personalSpace;
+    return {
+      accountId: String(j.accountId),
+      displayName: String(j.displayName ?? j.publicName ?? ''),
+      personalSpace: ps?.id ? { id: String(ps.id), key: String(ps.key) } : null,
+    };
+  }
+
+  async findPageByTitle(spaceId: string, title: string): Promise<{ id: string } | null> {
+    const q = new URLSearchParams({ 'space-id': spaceId, title, status: 'current', limit: '5' });
+    const res = await this.request(`/wiki/api/v2/pages?${q}`);
+    const j = await res.json();
+    const hit = (j.results ?? []).find((p: any) => p.title === title);
+    return hit ? { id: String(hit.id) } : null;
+  }
+
+  /** Creates a page only its creator can see and edit. */
+  async createPrivatePage(spaceId: string, title: string, storage: string): Promise<{ id: string }> {
+    const res = await this.request('/wiki/api/v2/pages?private=true', {
+      method: 'POST',
+      body: JSON.stringify({ spaceId, status: 'current', title, body: { representation: 'storage', value: storage } }),
+    });
+    const j = await res.json();
+    return { id: String(j.id) };
+  }
+
+  async getStoragePage(pageId: string): Promise<StoragePage> {
+    const res = await this.request(`/wiki/api/v2/pages/${encodeURIComponent(pageId)}?body-format=storage`);
+    const j = await res.json();
+    return {
+      id: String(j.id),
+      title: String(j.title ?? ''),
+      version: Number(j.version?.number),
+      value: String(j.body?.storage?.value ?? ''),
+      webUrl: j._links?.webui ? '/wiki' + j._links.webui : null,
+    };
+  }
+
+  /** Writes a new page version. Fails with 409 when `version` is no longer the latest. */
+  async updateStoragePage(pageId: string, title: string, version: number, storage: string, message: string): Promise<void> {
+    await this.request(`/wiki/api/v2/pages/${encodeURIComponent(pageId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        id: pageId,
+        status: 'current',
+        title,
+        body: { representation: 'storage', value: storage },
+        version: { number: version + 1, message },
+      }),
+    });
+  }
+
+  async readRestriction(pageId: string): Promise<PageReadRestriction> {
+    const res = await this.request(`/wiki/rest/api/content/${encodeURIComponent(pageId)}/restriction/byOperation/read`);
+    const j = await res.json();
+    return {
+      userIds: (j.restrictions?.user?.results ?? []).map((u: any) => String(u.accountId)),
+      groups: (j.restrictions?.group?.results ?? []).length,
+    };
+  }
+
+  /** Restricts viewing and editing of a page to one account. */
+  async restrictToUser(pageId: string, accountId: string): Promise<void> {
+    const user = [{ type: 'known', accountId }];
+    await this.request(`/wiki/rest/api/content/${encodeURIComponent(pageId)}/restriction`, {
+      method: 'PUT',
+      body: JSON.stringify([
+        { operation: 'read', restrictions: { user, group: [] } },
+        { operation: 'update', restrictions: { user, group: [] } },
+      ]),
+    });
+  }
+}
+
+export interface PageReadRestriction {
+  userIds: string[];
+  groups: number;
 }
 
 function adfPlain(n: AdfNode): string {
@@ -191,5 +333,7 @@ function toExisting(j: any): ExistingInlineComment {
     createdAt: j.version?.createdAt ?? null,
     bodyText,
     webUrl: j._links?.webui ? '/wiki' + j._links.webui : null,
+    resolutionStatus: j.resolutionStatus ?? null,
+    version: Number.isFinite(Number(j.version?.number)) ? Number(j.version.number) : null,
   };
 }

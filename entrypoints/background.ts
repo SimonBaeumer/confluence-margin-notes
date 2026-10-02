@@ -1,7 +1,9 @@
-// Background event page: context menu, keyboard command, toolbar badge.
-// No state lives here; notes are in storage.local.
+// Background event page: context menu, keyboard command, toolbar badge and
+// purging old deleted notes. No state lives here; notes are in storage.local.
 
 import type { ToBackground, ToContent } from '../src/core/messages';
+import { NoteStore } from '../src/core/store';
+import { purgeLocal } from '../src/sync/service';
 
 declare const __E2E__: boolean;
 
@@ -16,8 +18,19 @@ async function sendToTab(tabId: number | undefined, msg: ToContent): Promise<voi
   }
 }
 
+async function purge(): Promise<void> {
+  try {
+    const n = await purgeLocal(browser.storage.local, new NoteStore(browser.storage.local));
+    if (n) console.info(`[margin-notes] purged ${n} deleted note${n === 1 ? '' : 's'}`);
+  } catch (e) {
+    console.warn('[margin-notes] purge failed', e);
+  }
+}
+
 export default defineBackground(() => {
+  browser.runtime.onStartup.addListener(() => void purge());
   browser.runtime.onInstalled.addListener(() => {
+    void purge();
     browser.contextMenus.create({
       id: MENU_ID,
       title: 'Add margin note',
