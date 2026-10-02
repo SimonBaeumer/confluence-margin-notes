@@ -172,6 +172,6 @@ Dependencies to respect: the v1.1 generic adapter depends on the core/adapter bo
 
 **Decide (can be done during annotation):**
 
-6. Wording: "Review" (familiar from GitHub) or "Draft comments" (avoids a clash with Confluence page-approval apps)? This draft uses **Review**.
-7. Should a note created while a review is running default to Draft (as drafted) or ask every time?
-8. Should orphaned notes from deleted or moved pages show up anywhere globally (an "all notes" view), or only on their page?
+>> + Use "Draft comments" 6. Wording: "Review" (familiar from GitHub) or "Draft comments" (avoids a clash with Confluence page-approval apps)? This draft uses **Review**.
+>> + For now ask every time7. Should a note created while a review is running default to Draft (as drafted) or ask every time?
+>> + Yes, a global view would be nice. 8. Should orphaned notes from deleted or moved pages show up anywhere globally (an "all notes" view), or only on their page?
