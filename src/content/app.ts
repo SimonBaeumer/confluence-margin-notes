@@ -2,14 +2,15 @@
 
 import { browser } from 'wxt/browser';
 import { buildIndex, computeMatch, type PageTextIndex } from '../core/adf-text';
-import { anchor, describe, rebase, type AnchorResult } from '../core/anchoring';
+import { anchor, describe, rebase, targetForQuote, type AnchorResult } from '../core/anchoring';
 import { pageKeyFor, SETTINGS_KEY, type ActionResult, type PageInfo, type Settings, type ToContent } from '../core/messages';
-import { SCHEMA_VERSION, nowIso, type AdfDoc, type Note, type PageRef } from '../core/model';
+import { isGraduated } from '../core/graduate';
+import { SCHEMA_VERSION, commentKey, latestReplyAt, nowIso, type AdfDoc, type CommentRecord, type Note, type PageRef } from '../core/model';
 import { plainToAdf } from '../core/rich-text';
-import { isNoteKey, isSessionKey, NoteStore } from '../core/store';
+import { isCommentKey, isNoteKey, isSeenKey, isSessionKey, NoteStore } from '../core/store';
 import { ConfluenceClient } from '../confluence/client';
 import { DomMapper, findCommentMark, findRoot, readPageMeta, type PageMeta } from '../confluence/dom';
-import { editPublished, markThreadSeen, refreshThread, unpublish } from '../confluence/comments';
+import { deleteComment, editComment, readComment, readPageComments } from '../confluence/comments';
 import { gateFor, indexForVersion, publishNote, submitDrafts, type PublishHooks } from '../confluence/publish';
 import { readSyncConfig, SYNC_CONFIG_KEY, SyncService } from '../sync/service';
 import { Highlighter, type Painted } from './highlights';
@@ -22,10 +23,10 @@ const JUMP_RETRY_MS = 250;
 const SYNC_FIRST_MS = 3000;
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const SYNC_DEBOUNCE_MS = 10 * 1000;
-/** A published note's thread is read again at most this often per tab. */
-const THREAD_TTL_MS = 2 * 60 * 1000;
-const THREAD_SWEEP_MS = 10 * 60 * 1000;
-const THREAD_SWEEP_MAX = 25;
+/** A page's comments (or one of your comments elsewhere) are read again at most this often per tab. */
+const COMMENTS_TTL_MS = 2 * 60 * 1000;
+const COMMENT_SWEEP_MS = 10 * 60 * 1000;
+const COMMENT_SWEEP_MAX = 25;
 
 function uuid(): string {
   return crypto.randomUUID();
@@ -70,7 +71,16 @@ export class App {
   private index: PageTextIndex | null = null;
   private indexVersion: number | null = null;
   private mapper: DomMapper | null = null;
+  /** Private notes and drafts on this page. */
   private notes: Note[] = [];
+  /**
+   * Notes on this page that were published (tombstones, see graduate.ts). We
+   * highlight their text until Confluence draws the comment's own highlight,
+   * which it often only does after a reload.
+   */
+  private published: Note[] = [];
+  /** Cached comments on this page. */
+  private comments: CommentRecord[] = [];
   private results = new Map<string, AnchorResult>();
   private loading: Promise<void> | null = null;
   private lastKey = '';
@@ -82,7 +92,9 @@ export class App {
   private readonly sync = new SyncService(this.client, this.store, browser.storage.local);
   private syncEnabled = false;
   private syncTimer: number | undefined;
-  private threadCheckedAt = new Map<string, number>();
+  /** When a page's comments (by page key) or one comment (by comment key) were last read. */
+  private commentsCheckedAt = new Map<string, number>();
+  private me: Promise<string> | null = null;
 
   start(): void {
     setInterval(() => this.tick(), POLL_MS);
@@ -90,13 +102,15 @@ export class App {
     browser.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local') return;
       const keys = Object.keys(changes);
-      if (keys.some((k) => isNoteKey(k) || isSessionKey(k))) void this.refreshNotes();
-      if (keys.some(isNoteKey)) this.scheduleSync(SYNC_DEBOUNCE_MS);
+      if (keys.some((k) => isNoteKey(k) || isSessionKey(k) || isCommentKey(k))) void this.refreshNotes();
+      if (keys.some((k) => isNoteKey(k) || isSeenKey(k))) this.scheduleSync(SYNC_DEBOUNCE_MS);
       if (keys.includes(SYNC_CONFIG_KEY)) void this.initSync();
     });
+    // Published notes from older versions become comments.
+    void this.store.graduatePublished();
     void this.initSync();
     setInterval(() => this.scheduleSync(0), SYNC_INTERVAL_MS);
-    setInterval(() => void this.sweepThreads(), THREAD_SWEEP_MS);
+    setInterval(() => void this.sweepComments(), COMMENT_SWEEP_MS);
     browser.runtime.onMessage.addListener((msg: ToContent) => this.onMessage(msg));
     document.addEventListener('mouseup', (e) => this.onMouseUp(e), true);
     document.addEventListener('keyup', (e) => {
@@ -146,6 +160,8 @@ export class App {
     this.index = null;
     this.mapper = null;
     this.notes = [];
+    this.published = [];
+    this.comments = [];
     this.results.clear();
     this.highlighter.clear();
     this.overlay.closePopover();
@@ -174,7 +190,7 @@ export class App {
       this.pageRef.title = snap.title || meta.title;
       this.rebuildMapper();
       await this.refreshNotes();
-      void this.refreshThreads(this.notes.filter((n) => n.state === 'published'));
+      void this.refreshPageComments();
     } catch (e) {
       // A load the page has moved on from must not report into the next one.
       if (this.meta !== meta) return;
@@ -212,15 +228,18 @@ export class App {
     const version = this.indexVersion;
     // A reset or reload replaces the index while we await: stop then, the new load refreshes again.
     const stale = () => this.index !== index;
-    const notes = await this.store.notesForPage(pageKey);
+    const all = (await this.store.allNotes(true)).filter((n) => n.page.key === pageKey);
+    const comments = await this.store.commentsForPage(pageKey);
     if (stale()) return;
-    this.notes = notes;
-    for (const n of notes) {
-      if (n.state === 'published') {
-        // Only located, never saved: we paint it until Confluence shows its own highlight.
-        this.results.set(n.id, anchor(n.target, index, version));
-        continue;
-      }
+    this.notes = all.filter((n) => !n.deleted && n.state !== 'published');
+    this.comments = comments;
+    const live = new Set(comments.filter((c) => c.resolution !== 'deleted').map((c) => c.id));
+    this.published = all.filter((n) => isGraduated(n) && live.has(n.published!.commentId));
+    for (const n of this.published) {
+      // Only located, never saved: we paint it until Confluence shows its own highlight.
+      this.results.set(n.id, anchor(n.target, index, version));
+    }
+    for (const n of this.notes) {
       await this.anchorNote(n, index, version);
       if (stale()) return;
     }
@@ -259,18 +278,20 @@ export class App {
   private paint(): void {
     if (!this.mapper || !Highlighter.supported()) return;
     const items: Painted[] = [];
-    for (const n of this.notes) {
+    for (const n of this.published) {
       // Confluence only draws a new comment's highlight once it re-renders the page (often only
       // after a reload). Until then the published note keeps ours, or it would vanish.
-      if (n.state === 'published' && this.commentMark(n.id)) continue;
+      if (this.markFor(n.published!.inlineMarkerRef)) continue;
+      const r = this.results.get(n.id);
+      if (!r || r.start < 0) continue;
+      const ranges = this.mapper.offsetsToRanges(r.start, r.end);
+      if (ranges.length) items.push({ noteId: n.id, kind: 'published', ranges });
+    }
+    for (const n of this.notes) {
       const r = this.results.get(n.id);
       if (!r || r.start < 0) continue;
       const ranges = this.mapper.offsetsToRanges(r.start, r.end);
       if (!ranges.length) continue;
-      if (n.state === 'published') {
-        items.push({ noteId: n.id, kind: 'published', ranges });
-        continue;
-      }
       const attention = r.status === 'ambiguous' || r.status === 'changed' || n.target.exact !== n.target.originalExact;
       items.push({ noteId: n.id, kind: attention ? 'attention' : n.state === 'draft' ? 'draft' : 'private', ranges });
     }
@@ -384,11 +405,16 @@ export class App {
     if (id) this.openNote(id);
   }
 
+  private rectFor(id: string): DOMRect {
+    return this.highlighter.rangesFor(id)[0]?.getBoundingClientRect() ?? new DOMRect(window.innerWidth / 2 - 190, 120, 0, 0);
+  }
+
   private openNote(id: string): void {
+    const pub = this.published.find((n) => n.id === id);
+    if (pub) return this.openComment(pub.published!.commentId, this.rectFor(id));
     const note = this.notes.find((n) => n.id === id);
     if (!note) return;
-    const ranges = this.highlighter.rangesFor(id);
-    const rect = ranges[0]?.getBoundingClientRect() ?? new DOMRect(window.innerWidth / 2 - 190, 120, 0, 0);
+    const rect = this.rectFor(id);
     this.overlay.showEdit({
       mode: 'edit',
       note,
@@ -401,26 +427,54 @@ export class App {
       },
       onPublish: () => void this.publishOne(id),
       onDelete: () => void this.store.delete(id),
-      onEditPublished: (body) => this.editPublishedNote(id, body),
-      onUnpublish: () => this.unpublishNote(id),
     });
-    // Opening a published note shows its replies, so they count as read.
-    const seen = markThreadSeen(note);
-    if (seen) void this.store.update(id, { published: seen.published });
   }
 
-  /** Confluence's highlight of a published note, if it is on this page. */
-  private commentMark(id: string): HTMLElement | null {
-    const ref = this.notes.find((n) => n.id === id)?.published?.inlineMarkerRef;
+  /** Our popover for a comment Confluence has not drawn yet. */
+  private openComment(commentId: string, rect: DOMRect): void {
+    const c = this.comments.find((x) => x.id === commentId);
+    if (!c) return;
+    this.overlay.showComment({
+      comment: c,
+      anchorRect: rect,
+      onEdit: (body) => this.editCommentBody(c.page.site, c.id, body),
+      onUnpublish: () => this.unpublishComment(c.page.site, c.id),
+    });
+    // Opening a comment shows its replies, so they count as read.
+    void this.markSeen(c);
+  }
+
+  private async markSeen(c: CommentRecord): Promise<void> {
+    await this.store.applySeen({ [commentKey(c.page.site, c.id)]: latestReplyAt(c, c.createdAt ?? '') });
+  }
+
+  /** Confluence's highlight of a comment, if it is on this page. */
+  private markFor(ref: string | null | undefined): HTMLElement | null {
     const root = findRoot();
     return ref && root ? findCommentMark(root, ref) : null;
   }
 
-  private scrollTo(id: string): boolean {
-    const mark = this.commentMark(id);
-    if (mark) {
-      mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      return true;
+  /** The tombstone we highlight for a comment, if any. */
+  private publishedNoteFor(commentId: string): Note | undefined {
+    return this.published.find((n) => n.published!.commentId === commentId);
+  }
+
+  private commentMark(commentId: string): HTMLElement | null {
+    const c = this.comments.find((x) => x.id === commentId);
+    return this.markFor(c?.inlineMarkerRef ?? this.publishedNoteFor(commentId)?.published?.inlineMarkerRef);
+  }
+
+  /** Scrolls to a note, or to a comment (Confluence's highlight, else ours). */
+  private scrollTo(id: string, isComment = false): boolean {
+    if (isComment) {
+      const mark = this.commentMark(id);
+      if (mark) {
+        mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return true;
+      }
+      const pub = this.publishedNoteFor(id);
+      if (!pub) return false;
+      id = pub.id;
     }
     const ranges = this.highlighter.rangesFor(id);
     const first = ranges[0];
@@ -436,22 +490,23 @@ export class App {
    * progressively, so a note further down may have no DOM yet: scroll to the
    * end of what is rendered and look again.
    */
-  async jumpTo(id: string): Promise<boolean> {
+  async jumpTo(id: string, isComment = false): Promise<boolean> {
+    const hlId = () => (isComment ? (this.publishedNoteFor(id)?.id ?? '') : id);
     for (let attempt = 0; attempt < JUMP_ATTEMPTS; attempt++) {
-      if (this.scrollTo(id)) {
-        const rect = () => (this.commentMark(id) ?? this.highlighter.rangesFor(id)[0])?.getBoundingClientRect();
+      if (this.scrollTo(id, isComment)) {
+        const rect = () => ((isComment ? this.commentMark(id) : null) ?? this.highlighter.rangesFor(hlId())[0])?.getBoundingClientRect();
         // Popovers are placed from the target's position, so wait for the scroll to end. Content
         // rendered above the target can still push it out of view meanwhile: scroll again then.
         for (let i = 0; i < 4; i++) {
           await settled(() => rect()?.top);
           const r = rect();
           if (!r || (r.top >= 0 && r.bottom <= window.innerHeight)) break;
-          this.scrollTo(id);
+          this.scrollTo(id, isComment);
         }
         // Clicking Confluence's highlight opens its comment thread.
-        const mark = this.commentMark(id);
+        const mark = isComment ? this.commentMark(id) : null;
         if (mark) mark.click();
-        else this.openNote(id);
+        else this.openNote(hlId());
         return true;
       }
       const rendered = findRoot()?.querySelectorAll('[data-renderer-start-pos]');
@@ -522,69 +577,143 @@ export class App {
     }
   }
 
-  // ---- published comments -------------------------------------------------------
+  // ---- comments -------------------------------------------------------------------
 
-  /** Reads resolution and replies of published notes back from Confluence. */
-  private async refreshThreads(notes: Note[], force = false): Promise<string | null> {
+  /** Your Confluence account id, read once per tab. */
+  private myId(): Promise<string> {
+    this.me ??= this.client.currentUser().then(
+      (u) => u.accountId,
+      (e) => {
+        this.me = null;
+        throw e;
+      },
+    );
+    return this.me;
+  }
+
+  /** Reads every comment on this page into the cache. */
+  private async refreshPageComments(force = false): Promise<string | null> {
+    const page = this.pageRef;
+    if (!page?.pageId) return null;
+    if (!force && Date.now() - (this.commentsCheckedAt.get(page.key) ?? 0) < COMMENTS_TTL_MS) return null;
+    this.commentsCheckedAt.set(page.key, Date.now());
+    try {
+      const me = await this.myId();
+      const r = await readPageComments(this.client, page, me, await this.store.commentsForPage(page.key));
+      // Replies that exist when a comment is first seen are not news, unless the seen map says otherwise.
+      const seen: Record<string, string> = {};
+      for (const c of r.discovered) {
+        const key = commentKey(c.page.site, c.id);
+        if (c.mine && !(await this.store.seenAt(key))) seen[key] = latestReplyAt(c, c.createdAt ?? nowIso());
+      }
+      await this.store.applySeen(seen);
+      await this.store.putComments(r.writes);
+      await this.store.removeComments(r.removes);
+      return null;
+    } catch (e) {
+      console.warn('[margin-notes] could not read the comments of this page', (e as Error).message);
+      return (e as Error).message;
+    }
+  }
+
+  /** Re-reads your comments on other pages of this site. */
+  private async refreshMyComments(records: CommentRecord[], force = false): Promise<string | null> {
     let error: string | null = null;
-    for (const n of notes) {
-      if (n.state !== 'published' || n.page.site !== location.host) continue;
-      if (!force && Date.now() - (this.threadCheckedAt.get(n.id) ?? 0) < THREAD_TTL_MS) continue;
-      this.threadCheckedAt.set(n.id, Date.now());
+    const me = await this.myId().catch((e) => ((error = (e as Error).message), null));
+    if (!me) return error;
+    for (const c of records) {
+      const key = commentKey(c.page.site, c.id);
+      if (!force && Date.now() - (this.commentsCheckedAt.get(key) ?? 0) < COMMENTS_TTL_MS) continue;
+      this.commentsCheckedAt.set(key, Date.now());
       try {
-        const updated = await refreshThread(this.client, n);
-        if (updated) {
-          // Save on top of the latest copy, the note may have been edited meanwhile.
-          const cur = await this.store.get(n.id);
-          if (cur?.state === 'published' && cur.published?.commentId === n.published?.commentId) {
-            await this.store.update(n.id, { published: updated.published });
-          }
-        }
+        const next = await readComment(this.client, c, me);
+        if (next) await this.store.putComments([next]);
       } catch (e) {
         error = (e as Error).message;
-        console.warn('[margin-notes] could not read comment', n.published?.commentId, error);
+        console.warn('[margin-notes] could not read comment', c.id, error);
       }
     }
     return error;
   }
 
-  /** Every so often, published notes on other pages of this site are checked too. */
-  private async sweepThreads(): Promise<void> {
-    if (document.hidden) return;
-    const all = (await this.store.allNotes()).filter(
-      (n) => n.state === 'published' && n.page.site === location.host && n.published?.thread?.resolution !== 'deleted',
+  private async myCommentsOnSite(): Promise<CommentRecord[]> {
+    return (await this.store.allComments()).filter(
+      (c) => c.mine && c.page.site === location.host && c.page.key !== this.pageRef?.key && c.resolution !== 'deleted',
     );
-    all.sort((a, b) => (this.threadCheckedAt.get(a.id) ?? 0) - (this.threadCheckedAt.get(b.id) ?? 0));
-    await this.refreshThreads(all.slice(0, THREAD_SWEEP_MAX));
   }
 
-  private async editPublishedNote(id: string, body: AdfDoc): Promise<string | null> {
-    const n = await this.store.get(id);
-    if (!n) return 'Note not found.';
-    if (n.page.site !== location.host) return `Open a page on ${n.page.site} to edit this comment.`;
+  /** Every so often, your comments on other pages of this site are checked too. */
+  private async sweepComments(): Promise<void> {
+    if (document.hidden) return;
+    const mine = await this.myCommentsOnSite();
+    mine.sort((a, b) => (a.checkedAt ?? '').localeCompare(b.checkedAt ?? ''));
+    await this.refreshMyComments(mine.slice(0, COMMENT_SWEEP_MAX));
+  }
+
+  private async editCommentBody(site: string, id: string, body: AdfDoc): Promise<string | null> {
+    if (site !== location.host) return `Open a page on ${site} to edit this comment.`;
+    const c = await this.store.getComment(site, id);
+    if (!c) return 'Comment not found.';
     try {
-      const updated = await editPublished(this.client, n, body);
-      await this.store.put(updated);
+      await this.store.putComments([await editComment(this.client, c, body)]);
       return null;
     } catch (e) {
-      const msg = `Could not update the comment: ${(e as Error).message}`;
-      await this.store.update(id, { lastError: msg });
-      return msg;
+      return `Could not update the comment: ${(e as Error).message}`;
     }
   }
 
-  private async unpublishNote(id: string): Promise<string | null> {
-    const n = await this.store.get(id);
-    if (!n) return 'Note not found.';
-    if (n.page.site !== location.host) return `Open a page on ${n.page.site} to unpublish this comment.`;
+  /** Deletes your comment in Confluence and keeps it as a private note. */
+  private async unpublishComment(site: string, id: string): Promise<string | null> {
+    if (site !== location.host) return `Open a page on ${site} to unpublish this comment.`;
+    const c = await this.store.getComment(site, id);
+    if (!c) return 'Comment not found.';
     try {
-      await this.store.put(await unpublish(this.client, n));
-      return null;
+      await deleteComment(this.client, c);
     } catch (e) {
-      const msg = `Could not delete the comment: ${(e as Error).message}`;
-      await this.store.update(id, { lastError: msg });
-      return msg;
+      return `Could not delete the comment: ${(e as Error).message}`;
     }
+    // Where it was published from here (or synced from there), the note still knows its target.
+    const from = (await this.store.allNotes(true)).find((n) => isGraduated(n) && n.published!.commentId === id);
+    let target: Note['target'];
+    let status: Note['anchorStatus'] = 'pending';
+    if (from) target = from.target;
+    else {
+      let index = this.pageRef?.key === c.page.key ? this.index : null;
+      let version = this.indexVersion;
+      if (!index && c.page.pageId) {
+        try {
+          const snap = await this.client.getPage(c.page.pageId);
+          index = buildIndex(snap.adf);
+          version = snap.version;
+        } catch {
+          // Without the page text the note starts out orphaned.
+        }
+      }
+      const t = targetForQuote(index ?? buildIndex({ type: 'doc', content: [] }), c.quote, version ?? 0);
+      target = t.target;
+      status = t.status;
+    }
+    const match = this.pageRef?.key === c.page.key && this.index && target.end > target.start ? computeMatch(this.index, target.start, target.end) : null;
+    await this.store.put({
+      schemaVersion: SCHEMA_VERSION,
+      // A new id: the tombstone's deletion would win over bringing it back.
+      id: uuid(),
+      page: c.page,
+      state: 'private',
+      body: c.body,
+      target,
+      anchorStatus: status,
+      currentExact: null,
+      publishable: match ? match.ok : true,
+      unpublishableReason: match && !match.ok ? match.reason : null,
+      published: null,
+      lastError: null,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      deleted: false,
+    });
+    await this.store.removeComments([c]);
+    return null;
   }
 
   // ---- publishing -------------------------------------------------------------
@@ -662,14 +791,14 @@ export class App {
 
   private async retry(noteId: string, dialog: SubmitDialog): Promise<void> {
     const n = await this.store.get(noteId);
-    if (!n || n.state === 'published') return;
+    if (!n || n.deleted || n.state === 'published') return;
     await publishNote(this.client, n, this.hooks(dialog));
   }
 
   async publishOne(noteId: string): Promise<void> {
     await this.loading;
     const n = await this.store.get(noteId);
-    if (!n || n.state === 'published' || this.publishing) return;
+    if (!n || n.deleted || n.state === 'published' || this.publishing) return;
     const dialog = this.overlay.showSubmitDialog({
       title: 'Publish comment',
       items: [this.dialogItem(n)],
@@ -701,6 +830,7 @@ export class App {
       dialogOpen: this.overlay.dialogOpen,
       selection: range ? { text: range.toString(), offsets: this.mapper?.rangeToOffsets(range) ?? null } : null,
       notes: this.notes.map((n) => ({ id: n.id, state: n.state, exact: n.target.exact, result: this.results.get(n.id) })),
+      comments: this.comments.map((c) => ({ id: c.id, mine: c.mine, resolution: c.resolution, quote: c.quote })),
     };
   }
 
@@ -728,6 +858,9 @@ export class App {
       case 'jump-to':
         await this.loading;
         return await this.jumpTo(msg.noteId);
+      case 'jump-to-comment':
+        await this.loading;
+        return await this.jumpTo(msg.commentId, true);
       case 'open-submit':
         await this.openSubmit();
         return true;
@@ -736,13 +869,14 @@ export class App {
         return true;
       case 'reattach':
         return { error: await this.reattach(msg.noteId) };
-      case 'edit-published':
-        return { error: await this.editPublishedNote(msg.noteId, msg.body) } satisfies ActionResult;
+      case 'edit-comment':
+        return { error: await this.editCommentBody(msg.site, msg.commentId, msg.body) } satisfies ActionResult;
       case 'unpublish':
-        return { error: await this.unpublishNote(msg.noteId) } satisfies ActionResult;
-      case 'refresh-threads': {
-        const published = (await this.store.allNotes()).filter((n) => n.state === 'published' && n.page.site === location.host);
-        return { error: await this.refreshThreads(published, true) } satisfies ActionResult;
+        return { error: await this.unpublishComment(msg.site, msg.commentId) } satisfies ActionResult;
+      case 'refresh-comments': {
+        const here = await this.refreshPageComments(true);
+        const elsewhere = await this.refreshMyComments(await this.myCommentsOnSite(), true);
+        return { error: here ?? elsewhere } satisfies ActionResult;
       }
       case 'sync-setup':
         return { error: await this.setupSync() } satisfies ActionResult;

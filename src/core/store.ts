@@ -1,11 +1,13 @@
 // NoteStore on top of storage.local.
 //
-// One key per note ("note:<id>") and per draft session ("session:<pageKey>"),
-// so concurrent writers (content script, sidebar) never overwrite each other's
-// records. Every context reads and writes storage directly and listens to
+// One key per note ("note:<id>"), per draft session ("session:<pageKey>"), per
+// cached Confluence comment ("comment:<site>:<id>") and per seen-map entry
+// ("seen:<site>:<id>"), so concurrent writers (content script, sidebar) never
+// overwrite each other's records. Every context reads and writes storage directly and listens to
 // storage.onChanged; the background page is not a bottleneck.
 
-import { SCHEMA_VERSION, nowIso, type DraftSession, type Note } from './model';
+import { graduate, isGraduated, needsGraduation, commentFromNote } from './graduate';
+import { SCHEMA_VERSION, commentKey, nowIso, type CommentRecord, type DraftSession, type Note } from './model';
 
 export interface StorageAreaLike {
   get(keys?: string | string[] | null): Promise<Record<string, unknown>>;
@@ -23,6 +25,8 @@ export interface ExportFile {
 
 const NOTE = 'note:';
 const SESSION = 'session:';
+const COMMENT = 'comment:';
+const SEEN = 'seen:';
 
 export class NoteStore {
   constructor(private readonly area: StorageAreaLike) {}
@@ -44,10 +48,53 @@ export class NoteStore {
     return (r[NOTE + id] as Note | undefined) ?? null;
   }
 
+  /** Saves a note. A published note graduates: see graduate.ts. */
   async put(note: Note): Promise<Note> {
+    if (needsGraduation(note)) return (await this.graduate([note]))[0]!;
     const stored = { ...note, schemaVersion: SCHEMA_VERSION, updatedAt: nowIso() };
     await this.area.set({ [NOTE + note.id]: stored });
     return stored;
+  }
+
+  /** Turns published notes into tombstones plus comment records. Returns the tombstones. */
+  private async graduate(notes: Note[]): Promise<Note[]> {
+    if (!notes.length) return [];
+    const items: Record<string, unknown> = {};
+    const seen: Record<string, string> = {};
+    const out: Note[] = [];
+    const existing = await this.area.get(notes.map((n) => COMMENT + commentKey(n.page.site, n.published!.commentId)));
+    for (const n of notes) {
+      const g = graduate({ ...n, schemaVersion: SCHEMA_VERSION });
+      items[NOTE + n.id] = g.tombstone;
+      const key = COMMENT + g.seen.key;
+      // A record read from Confluence already is newer than what the note knows.
+      if (!existing[key]) items[key] = g.comment;
+      seen[g.seen.key] = g.seen.at;
+      out.push(g.tombstone);
+    }
+    await this.area.set(items);
+    await this.applySeen(seen);
+    return out;
+  }
+
+  /** Graduates published notes left over from older versions or received from them. Returns how many. */
+  async graduatePublished(): Promise<number> {
+    const todo = (await this.allNotes()).filter(needsGraduation);
+    await this.graduate(todo);
+    return todo.length;
+  }
+
+  /** Adds comment records for tombstones received from another machine, so their comments show here too. */
+  async ensureComments(notes: Note[]): Promise<void> {
+    const grads = notes.filter(isGraduated);
+    if (!grads.length) return;
+    const keys = grads.map((n) => COMMENT + commentKey(n.page.site, n.published!.commentId));
+    const existing = await this.area.get(keys);
+    const items: Record<string, unknown> = {};
+    grads.forEach((n, i) => {
+      if (!existing[keys[i]!]) items[keys[i]!] = commentFromNote(n);
+    });
+    if (Object.keys(items).length) await this.area.set(items);
   }
 
   async update(id: string, patch: Partial<Note>): Promise<Note | null> {
@@ -60,6 +107,70 @@ export class NoteStore {
   async delete(id: string): Promise<void> {
     await this.update(id, { deleted: true });
   }
+
+  // ---- comments read from Confluence ---------------------------------------------
+
+  async allComments(): Promise<CommentRecord[]> {
+    const all = await this.area.get(null);
+    return Object.entries(all)
+      .filter(([k]) => k.startsWith(COMMENT))
+      .map(([, v]) => v as CommentRecord);
+  }
+
+  async commentsForPage(pageKey: string): Promise<CommentRecord[]> {
+    return (await this.allComments()).filter((c) => c.page.key === pageKey);
+  }
+
+  async getComment(site: string, id: string): Promise<CommentRecord | null> {
+    const k = COMMENT + commentKey(site, id);
+    return ((await this.area.get(k))[k] as CommentRecord | undefined) ?? null;
+  }
+
+  async putComments(records: CommentRecord[]): Promise<void> {
+    if (!records.length) return;
+    await this.area.set(Object.fromEntries(records.map((c) => [COMMENT + commentKey(c.page.site, c.id), c])));
+  }
+
+  async removeComments(records: { page: { site: string }; id: string }[]): Promise<void> {
+    if (records.length) await this.area.remove(records.map((c) => COMMENT + commentKey(c.page.site, c.id)));
+  }
+
+  /**
+   * The seen map: per comment (by commentKey), replies created up to this
+   * time count as read. Synced, because what you have read is about you, not
+   * about the comment.
+   */
+  async seen(): Promise<Record<string, string>> {
+    const all = await this.area.get(null);
+    return Object.fromEntries(
+      Object.entries(all)
+        .filter(([k]) => k.startsWith(SEEN))
+        .map(([k, v]) => [k.slice(SEEN.length), v as string]),
+    );
+  }
+
+  async seenAt(key: string): Promise<string | null> {
+    return ((await this.area.get(SEEN + key))[SEEN + key] as string | undefined) ?? null;
+  }
+
+  /** Merges seen times; an entry only ever moves forward. Returns how many changed. */
+  async applySeen(entries: Record<string, string>): Promise<number> {
+    const keys = Object.keys(entries);
+    if (!keys.length) return 0;
+    const cur = await this.area.get(keys.map((k) => SEEN + k));
+    const items: Record<string, unknown> = {};
+    for (const k of keys) {
+      const at = entries[k];
+      // An empty time would hide every later reply.
+      if (!at) continue;
+      const was = cur[SEEN + k] as string | undefined;
+      if (!was || at > was) items[SEEN + k] = at;
+    }
+    if (Object.keys(items).length) await this.area.set(items);
+    return Object.keys(items).length;
+  }
+
+  // ---- draft sessions -------------------------------------------------------------
 
   async session(pageKey: string): Promise<DraftSession | null> {
     const r = await this.area.get(SESSION + pageKey);
@@ -151,6 +262,8 @@ export class NoteStore {
       if (!cur || cur.updatedAt < s.updatedAt) items[SESSION + s.pageKey] = s;
     }
     if (Object.keys(items).length) await this.area.set(items);
+    // Exports from older versions hold published notes.
+    await this.graduatePublished();
     return taken;
   }
 }
@@ -166,6 +279,14 @@ export function isNoteKey(key: string): boolean {
 
 export function isSessionKey(key: string): boolean {
   return key.startsWith(SESSION);
+}
+
+export function isCommentKey(key: string): boolean {
+  return key.startsWith(COMMENT);
+}
+
+export function isSeenKey(key: string): boolean {
+  return key.startsWith(SEEN);
 }
 
 /** In-memory storage area for tests. */

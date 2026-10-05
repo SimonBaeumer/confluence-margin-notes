@@ -4,7 +4,8 @@
 // lives on, so it uses the same session as publishing. One run: read the sync
 // page -> merge with the local notes -> write a new page version if anything
 // changed (retrying on a version conflict) -> apply the merge locally -> purge
-// tombstones that are no longer needed.
+// tombstones that are no longer needed. Published notes are synced as
+// tombstones only; their comments come from Confluence (see core/graduate.ts).
 
 import { fingerprint, type NoteStore, type StorageAreaLike } from '../core/store';
 import { ConfluenceError, type ConfluenceClient } from '../confluence/client';
@@ -126,9 +127,11 @@ export class SyncService {
       for (let attempt = 0; ; attempt++) {
         const page = await this.client.getStoragePage(config.pageId);
         const remote = parseSyncPage(page.value, startedAt);
+        // Published notes from older versions become tombstones before they are sent.
+        await this.store.graduatePublished();
         const local = await this.store.allNotes(true);
         const expected = new Map(local.map((n) => [n.id, fingerprint(n)]));
-        const m = merge(local, remote, new Date());
+        const m = merge(local, remote, new Date(), await this.store.seen());
         if (m.remoteChanged) {
           try {
             await this.client.updateStoragePage(config.pageId, page.title, page.version, renderSyncPage(m.doc), 'margin-notes sync');
@@ -139,6 +142,10 @@ export class SyncService {
           }
         }
         const applied = await this.store.applyRemote(m.localWrites, m.localRemoves, expected);
+        await this.store.ensureComments(m.localWrites);
+        await this.store.applySeen(m.seenWrites);
+        // Published notes received from machines still on an older version.
+        await this.store.graduatePublished();
         result = [applied ? `${applied} note${applied === 1 ? '' : 's'} updated here` : '', m.remoteChanged ? 'changes sent' : '']
           .filter(Boolean)
           .join(', ') || 'Up to date';

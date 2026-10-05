@@ -46,6 +46,9 @@ export interface ExistingInlineComment {
   inlineOriginalSelection: string | null;
   authorId: string | null;
   createdAt: string | null;
+  /** Set on replies. */
+  parentCommentId: string | null;
+  body: AdfDoc | null;
   bodyText: string;
   webUrl: string | null;
   resolutionStatus: string | null;
@@ -171,7 +174,7 @@ export class ConfluenceClient {
     return toExisting(await res.json());
   }
 
-  /** Open inline comments on a page, used to avoid duplicates after an uncertain failure. */
+  /** The inline comments on a page (top-level, any resolution status). */
   async listInlineComments(pageId: string): Promise<ExistingInlineComment[]> {
     const out: ExistingInlineComment[] = [];
     let next: string | null =
@@ -319,9 +322,13 @@ function adfPlain(n: AdfNode): string {
 
 function toExisting(j: any): ExistingInlineComment {
   let bodyText = '';
+  let body: AdfDoc | null = null;
   try {
     const raw = j.body?.atlas_doc_format?.value;
-    if (typeof raw === 'string') bodyText = adfPlain(JSON.parse(raw));
+    if (typeof raw === 'string') {
+      body = JSON.parse(raw) as AdfDoc;
+      bodyText = adfPlain(body);
+    }
   } catch {
     // ignore
   }
@@ -331,6 +338,8 @@ function toExisting(j: any): ExistingInlineComment {
     inlineOriginalSelection: j.properties?.inlineOriginalSelection ?? null,
     authorId: j.version?.authorId ?? null,
     createdAt: j.version?.createdAt ?? null,
+    parentCommentId: j.parentCommentId ? String(j.parentCommentId) : null,
+    body,
     bodyText,
     webUrl: j._links?.webui ? '/wiki' + j._links.webui : null,
     resolutionStatus: j.resolutionStatus ?? null,

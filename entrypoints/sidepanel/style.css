@@ -42,7 +42,9 @@ textarea { min-height: 52px; resize: vertical; }
 .filter.on { background: var(--mn-fg); color: var(--mn-bg); border-color: var(--mn-fg); }
 .filter.on span { color: inherit; opacity: 0.7; }
 .note { border: 1px solid var(--mn-border); border-left: 3px solid var(--mn-private); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
-.note.draft { border-left-color: var(--mn-draft); } .note.published { border-left-color: var(--mn-ok); opacity: 0.85; }
+.note.draft { border-left-color: var(--mn-draft); }
+.note.comment { border-left-color: var(--mn-ok); } .note.comment.others { border-left-color: var(--mn-border); }
+.dot:not(.private):not(.draft):not(.published) { background: var(--mn-border); }
 .note header { display: flex; align-items: center; gap: 6px; }
 .note .state { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--mn-muted); }
 .note .quote { all: unset; cursor: pointer; font-size: 12.5px; color: var(--mn-muted); border-left: 2px solid var(--mn-border); padding-left: 7px; }

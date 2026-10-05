@@ -3,6 +3,11 @@
 
 export const SCHEMA_VERSION = 1;
 
+/**
+ * "published" only lives on as a tombstone: once a note is published, its
+ * comment is read from Confluence (see CommentRecord) and the note itself is
+ * deleted (see graduate.ts).
+ */
 export type NoteState = 'private' | 'draft' | 'published';
 
 /** Result of the last re-anchoring pass, shown next to every note. */
@@ -83,8 +88,33 @@ export interface PublishInfo {
   inlineMarkerRef: string | null;
   webUrl: string | null;
   publishedAt: string;
-  /** Absent until the comment was checked once. */
+  /** Only in data from older versions, which tracked the thread on the note. */
   thread?: CommentThread | null;
+}
+
+/**
+ * An inline comment as last read from Confluence, kept in this browser only
+ * (never synced: Confluence is the source of truth). Covers your comments and
+ * other people's, whether published through margin-notes or not.
+ */
+export interface CommentRecord {
+  /** The Confluence comment id. */
+  id: string;
+  page: PageRef;
+  authorId: string | null;
+  authorName: string | null;
+  /** Written by you. */
+  mine: boolean;
+  body: AdfDoc;
+  /** The text the comment is on. */
+  quote: string;
+  inlineMarkerRef: string | null;
+  webUrl: string | null;
+  createdAt: string | null;
+  resolution: CommentResolution;
+  replies: CommentReply[];
+  /** When it was last read from Confluence (null: not yet, e.g. right after publishing). */
+  checkedAt: string | null;
 }
 
 export interface Note {
@@ -131,15 +161,28 @@ const RESOLUTION_LABEL: Record<CommentResolution, string> = {
   deleted: 'Deleted in Confluence',
 };
 
-/** One line on what happened to a published comment, e.g. "Resolved, 2 replies". */
-export function threadLabel(t: CommentThread): string {
-  const n = t.replies.length;
-  return `${RESOLUTION_LABEL[t.resolution]}, ${n ? `${n} repl${n === 1 ? 'y' : 'ies'}` : 'no replies'}`;
+/** One line on what happened to a comment, e.g. "Resolved, 2 replies". */
+export function commentLabel(c: CommentRecord): string {
+  const n = c.replies.length;
+  return `${RESOLUTION_LABEL[c.resolution]}, ${n ? `${n} repl${n === 1 ? 'y' : 'ies'}` : 'no replies'}`;
 }
 
-/** Replies by other people that arrived after the note was last looked at. */
-export function unreadReplies(note: Note): CommentReply[] {
-  const t = note.published?.thread;
-  if (!t) return [];
-  return t.replies.filter((r) => (!t.seenAt || (r.createdAt ?? '') > t.seenAt) && !r.mine);
+/**
+ * Replies by other people to your comment that arrived after it was last
+ * looked at. `seenAt` comes from the seen map (see NoteStore.seen); without
+ * one nothing counts as new.
+ */
+export function unreadReplies(c: CommentRecord, seenAt: string | null): CommentReply[] {
+  if (!c.mine || !seenAt) return [];
+  return c.replies.filter((r) => !r.mine && (r.createdAt ?? '') > seenAt);
+}
+
+/** The newest reply time, or `fallback` when there are no replies. */
+export function latestReplyAt(c: CommentRecord, fallback: string): string {
+  return c.replies.reduce((m, r) => ((r.createdAt ?? '') > m ? (r.createdAt ?? '') : m), fallback);
+}
+
+/** Key of a comment in the seen map and in storage: "<site>:<comment id>". */
+export function commentKey(site: string, commentId: string): string {
+  return `${site}:${commentId}`;
 }

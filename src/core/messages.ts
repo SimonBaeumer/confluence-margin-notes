@@ -7,17 +7,19 @@ export type ToContent =
   | { type: 'get-page' }
   | { type: 'scroll-to'; noteId: string }
   | { type: 'edit-note'; noteId: string }
-  /** Scrolls to a note and opens it: our popover, or Confluence's thread once published. Answers whether it was found. */
+  /** Scrolls to a note and opens our popover. Answers whether it was found. */
   | { type: 'jump-to'; noteId: string }
+  /** Scrolls to a comment on this page and opens its thread. Answers whether it was found. */
+  | { type: 'jump-to-comment'; commentId: string }
   | { type: 'open-submit' }
   | { type: 'publish-now'; noteId: string }
   | { type: 'reattach'; noteId: string }
-  /** Replaces the text of a published comment in Confluence. Answers { error }. */
-  | { type: 'edit-published'; noteId: string; body: AdfDoc }
-  /** Deletes a published comment in Confluence; the note becomes private. Answers { error }. */
-  | { type: 'unpublish'; noteId: string }
-  /** Re-reads resolution and replies of published notes on this site. Answers { error }. */
-  | { type: 'refresh-threads' }
+  /** Replaces the text of your comment in Confluence. Answers { error }. */
+  | { type: 'edit-comment'; site: string; commentId: string; body: AdfDoc }
+  /** Deletes your comment in Confluence and keeps it as a private note. Answers { error }. */
+  | { type: 'unpublish'; site: string; commentId: string }
+  /** Re-reads the comments on this page and your comments on this site. Answers { error }. */
+  | { type: 'refresh-comments' }
   /** Sets up sync on this tab's site. Answers { error }. */
   | { type: 'sync-setup' }
   /** Answers { error }. */

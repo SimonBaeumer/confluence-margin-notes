@@ -1,5 +1,5 @@
 import { buildIndex } from '../src/core/adf-text';
-import { anchor, describe as describeTarget } from '../src/core/anchoring';
+import { anchor, describe as describeTarget, targetForQuote } from '../src/core/anchoring';
 import type { AdfNode } from '../src/core/model';
 
 const p = (localId: string, text: string): AdfNode => ({
@@ -87,5 +87,18 @@ describe('anchor', () => {
     const t = describeTarget(idx0, 4, 7, 1);
     const idx2 = buildIndex(doc(p('b', 'the car sat')));
     expect(anchor(t, idx2, 2).status).toBe('orphaned');
+  });
+});
+
+describe('targetForQuote', () => {
+  it('anchors a unique quote, takes the first of several and keeps a missing one as orphaned', () => {
+    const one = targetForQuote(idx1, 'short interruption', 1);
+    expect(one.status).toBe('anchored');
+    expect(anchor(one.target, idx1, 1)).toMatchObject({ status: 'anchored', exact: 'short interruption' });
+    const two = targetForQuote(idx1, 'XFRROperatingPoint', 1);
+    expect(two.status).toBe('ambiguous');
+    expect(two.target.start).toBe(idx1.text.indexOf('XFRROperatingPoint'));
+    const none = targetForQuote(idx1, 'not on the page', 1);
+    expect(none).toMatchObject({ status: 'orphaned', target: { exact: 'not on the page', originalExact: 'not on the page' } });
   });
 });
