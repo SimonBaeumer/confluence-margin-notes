@@ -79,15 +79,24 @@ describe('merge', () => {
     expect(m.remoteChanged).toBe(true);
   });
 
-  it('never marks replies unread again', () => {
-    const thread = (seenAt: string) => ({
-      commentId: 'c', inlineMarkerRef: null, webUrl: null, publishedAt: ago(DAY),
-      thread: { resolution: 'open' as const, replies: [], changedAt: ago(DAY), seenAt },
+  it('merges the seen map by the later time and drops year-old entries', () => {
+    const remote = { ...doc([]), seen: { 'x:c1': ago(DAY), 'x:c2': ago(500), 'x:old': ago(400 * DAY) } };
+    const m = merge([], remote, NOW, { 'x:c1': ago(1000), 'x:c3': ago(DAY) });
+    expect(m.doc.seen).toEqual({ 'x:c1': ago(1000), 'x:c2': ago(500), 'x:c3': ago(DAY) });
+    expect(m.seenWrites).toEqual({ 'x:c2': ago(500) });
+    expect(m.remoteChanged).toBe(true);
+    expect(merge([], m.doc, NOW, m.doc.seen).remoteChanged).toBe(false);
+  });
+
+  it('lets a published note (a tombstone) win over an older draft copy', () => {
+    const draft = note('a', ago(1000), { state: 'draft' });
+    const published = note('a', ago(DAY), {
+      state: 'published',
+      deleted: true,
+      published: { commentId: 'c', inlineMarkerRef: null, webUrl: null, publishedAt: ago(DAY) },
     });
-    const local = note('a', ago(2000), { state: 'published', published: thread(ago(500)) });
-    const remote = note('a', ago(1000), { state: 'published', published: thread(ago(DAY)) });
-    const m = merge([local], doc([remote]), NOW);
-    expect(m.doc.notes[0]!.published!.thread!.seenAt).toBe(ago(500));
+    const m = merge([draft], doc([published]), NOW);
+    expect(m.localWrites).toEqual([published]);
   });
 });
 
@@ -206,6 +215,70 @@ describe('SyncService', () => {
     const writes = s.writes;
     await syncA.run();
     expect(s.writes).toBe(writes);
+  });
+
+  it('never brings a published note back as a draft, and moves its comment and read state across', async () => {
+    const { s, client } = fakeConfluence();
+    const areaA = new MemoryArea();
+    const areaB = new MemoryArea();
+    const a = new NoteStore(areaA);
+    const b = new NoteStore(areaB);
+    const syncA = new SyncService(client, a, areaA);
+    const syncB = new SyncService(client, b, areaB);
+    const draft = await a.put(note('n1', ago(DAY), { state: 'draft' }));
+    await syncA.setup('x');
+    await syncB.setup('x');
+    expect((await b.get('n1'))!.state).toBe('draft');
+
+    // A publishes; B still holds the draft and edits it before syncing.
+    await a.put({ ...draft, state: 'published', published: { commentId: 'c1', inlineMarkerRef: 'm', webUrl: null, publishedAt: ago(1000) } });
+    expect(await a.allNotes()).toEqual([]);
+    expect((await a.allComments()).map((c) => c.id)).toEqual(['c1']);
+    await b.update('n1', { body: plainToAdf('edited on B') });
+    await syncA.run();
+    await syncB.run();
+    await syncA.run();
+    for (const st of [a, b]) {
+      expect(await st.allNotes()).toEqual([]);
+      expect((await st.get('n1'))!).toMatchObject({ deleted: true, state: 'published' });
+    }
+    expect((await b.allComments()).map((c) => [c.id, c.mine])).toEqual([['c1', true]]);
+    expect(await b.seen()).toEqual({ 'x:c1': ago(1000) });
+
+    // Marking replies read on B reaches A. Seen times only move forward and are never empty.
+    await b.applySeen({ 'x:c1': ago(10) });
+    await b.applySeen({ 'x:c1': ago(DAY), 'x:c2': '' });
+    await syncB.run();
+    await syncA.run();
+    expect(await a.seen()).toEqual({ 'x:c1': ago(10) });
+    // The comment text itself never goes to the sync page.
+    expect([...s.pages.values()][0]!.value).not.toContain('"thread"');
+  });
+
+  it('graduates published notes written by an older version', async () => {
+    const { s, client } = fakeConfluence();
+    const area = new MemoryArea();
+    const store = new NoteStore(area);
+    const sync = new SyncService(client, store, area);
+    await sync.setup('x');
+    const id = [...s.pages.keys()][0]!;
+    const old = note('n9', ago(DAY), {
+      state: 'published',
+      published: {
+        commentId: 'c9', inlineMarkerRef: null, webUrl: null, publishedAt: ago(2 * DAY),
+        thread: { resolution: 'open', replies: [], changedAt: ago(DAY), seenAt: ago(DAY) },
+      },
+    });
+    const p = s.pages.get(id)!;
+    p.value = renderSyncPage({ ...emptySyncDoc(ago(DAY)), notes: [old] });
+    p.version++;
+    await sync.run();
+    expect(await store.allNotes()).toEqual([]);
+    expect((await store.allComments()).map((c) => c.id)).toEqual(['c9']);
+    expect(await store.seen()).toEqual({ 'x:c9': ago(DAY) });
+    await sync.run();
+    const remote = parseSyncPage(s.pages.get(id)!.value, NOW.toISOString());
+    expect(remote.notes.map((n) => [n.id, n.deleted, n.published?.thread])).toEqual([['n9', true, undefined]]);
   });
 
   it('merges again after a version conflict', async () => {

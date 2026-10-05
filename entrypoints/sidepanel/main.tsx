@@ -2,13 +2,12 @@ import { render } from 'preact';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ActionResult, PageInfo, Settings, ToContent } from '../../src/core/messages';
 import { SETTINGS_KEY } from '../../src/core/messages';
-import type { DraftSession, Note, NoteState } from '../../src/core/model';
-import { threadLabel, unreadReplies } from '../../src/core/model';
+import type { AdfDoc, CommentRecord, DraftSession, Note, NoteState } from '../../src/core/model';
+import { commentKey, commentLabel, latestReplyAt, unreadReplies } from '../../src/core/model';
 import { adfToFragment } from '../../src/core/rich-text';
-import type { AdfDoc } from '../../src/core/model';
-import { isEmptyQuery, matches, parseQuery, SEARCH_HELP, snippet, type Query } from '../../src/core/search';
+import { isEmptyQuery, matches, needsAttention, parseQuery, SEARCH_HELP, snippet, type Entry, type EntryKind, type Query } from '../../src/core/search';
 import { NoteStore, type ExportFile } from '../../src/core/store';
-import { markThreadSeen, unpublishQuestion } from '../../src/confluence/comments';
+import { unpublishQuestion } from '../../src/confluence/comments';
 import { readSyncConfig, readSyncState, SYNC_CONFIG_KEY, SYNC_STATE_KEY, type SyncConfig, type SyncState } from '../../src/sync/service';
 import { createEditor, EDITOR_CSS, type Editor } from '../../src/ui/editor';
 import './style.css';
@@ -48,14 +47,34 @@ async function openInTab(url: string): Promise<void> {
   else await browser.tabs.create({ url });
 }
 
-type Filter = 'all' | NoteState | 'attention';
+type NoteFilter = 'all' | 'private' | 'draft' | 'attention';
+type Filter = NoteFilter | 'comments';
 type View = 'page' | 'all' | 'settings';
 
 const STATE_LABEL: Record<NoteState, string> = { private: 'Private', draft: 'Draft comment', published: 'Published' };
+const FILTER_LABEL: Record<Filter, string> = { all: 'All notes', private: 'Private', draft: 'Draft', attention: 'Needs attention', comments: 'Comments' };
 const NEEDS_ATTENTION = new Set(['orphaned', 'ambiguous', 'changed']);
 
-function needsAttention(n: Note): boolean {
-  return n.state !== 'published' && NEEDS_ATTENTION.has(n.anchorStatus);
+function inFilter(n: Note, f: NoteFilter): boolean {
+  return f === 'all' ? true : f === 'attention' ? needsAttention(n) : n.state === f;
+}
+
+const noteEntry = (note: Note): Entry => ({ kind: 'note', note });
+
+function commentEntry(comment: CommentRecord, seen: Record<string, string>): Entry & { kind: 'comment' } {
+  return { kind: 'comment', comment, seenAt: seen[commentKey(comment.page.site, comment.id)] ?? null };
+}
+
+function byCreated(a: { comment: CommentRecord }, b: { comment: CommentRecord }): number {
+  return (a.comment.createdAt ?? '').localeCompare(b.comment.createdAt ?? '');
+}
+
+function markRead(c: CommentRecord): void {
+  void store.applySeen({ [commentKey(c.page.site, c.id)]: latestReplyAt(c, c.createdAt ?? '') });
+}
+
+function authorOf(c: CommentRecord): string {
+  return c.mine ? 'You' : (c.authorName ?? 'Someone');
 }
 
 function useStorageTick(): number {
@@ -110,15 +129,15 @@ async function saveLocal(note: Note, body: AdfDoc): Promise<string | null> {
 }
 
 function InlineEditor({
-  note,
+  body,
   onDone,
-  onSave = (body) => saveLocal(note, body),
+  onSave,
   saveLabel = 'Save',
   hint,
 }: {
-  note: Note;
+  body: AdfDoc;
   onDone: () => void;
-  onSave?: (body: AdfDoc) => Promise<string | null>;
+  onSave: (body: AdfDoc) => Promise<string | null>;
   saveLabel?: string;
   hint?: string;
 }) {
@@ -127,7 +146,7 @@ function InlineEditor({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    const e = createEditor(document, note.body);
+    const e = createEditor(document, body);
     editor.current = e;
     host.current!.append(e.el);
     e.onSubmit(save);
@@ -159,38 +178,6 @@ function InlineEditor({
   );
 }
 
-function Thread({ note }: { note: Note }) {
-  const t = note.published?.thread;
-  if (!t) return null;
-  const unread = new Set(unreadReplies(note).map((r) => r.id));
-  return (
-    <div class="thread">
-      <div class="row">
-        <span class={`chip ${t.resolution === 'resolved' ? 'ok' : t.resolution === 'deleted' || t.resolution === 'dangling' ? 'warn' : ''}`}>{threadLabel(t)}</span>
-        {unread.size > 0 && <span class="chip new">{unread.size} new</span>}
-        <span class="spacer" />
-        {unread.size > 0 && (
-          <button
-            class="b small"
-            onClick={() => {
-              const seen = markThreadSeen(note);
-              if (seen) void store.update(note.id, { published: seen.published });
-            }}
-          >
-            Mark read
-          </button>
-        )}
-      </div>
-      {t.replies.map((r) => (
-        <div class={`reply ${unread.has(r.id) ? 'unread' : ''}`}>
-          <span class="who">{r.mine ? 'You' : (r.authorName ?? 'Someone')}</span> <span class="muted">{r.createdAt ? new Date(r.createdAt).toLocaleString() : ''}</span>
-          <div>{r.text}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function NoteCard({ note, onPage }: { note: Note; onPage: boolean }) {
   const [editing, setEditing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -202,22 +189,11 @@ function NoteCard({ note, onPage }: { note: Note; onPage: boolean }) {
     const r = await toTab<{ error: string | null }>({ type: 'reattach', noteId: note.id });
     setMsg(r?.error ?? null);
   };
-  const commentUrl = note.published?.webUrl ? new URL(note.published.webUrl, `https://${note.page.site}`).href : null;
   const jump = async () => {
     setMsg(null);
-    // A published note opens Confluence's thread, which shows the replies.
-    const seen = markThreadSeen(note);
-    if (seen) void store.update(note.id, { published: seen.published });
-    if (await toTab<boolean>({ type: 'jump-to', noteId: note.id })) return;
-    // Not on the page (anymore): open the comment's own URL in the same tab.
-    if (commentUrl) await openInTab(commentUrl);
-    else setMsg('Could not find this note on the page.');
+    if (!(await toTab<boolean>({ type: 'jump-to', noteId: note.id }))) setMsg('Could not find this note on the page.');
   };
-  const unpublishIt = async () => {
-    if (!confirm(unpublishQuestion(note))) return;
-    setMsg(await act({ type: 'unpublish', noteId: note.id }, note.page.site));
-  };
-  const changed = note.state !== 'published' && note.target.exact !== note.target.originalExact;
+  const changed = note.target.exact !== note.target.originalExact;
   const lost = note.anchorStatus === 'orphaned' || note.anchorStatus === 'ambiguous';
   const publishBlocked = !note.publishable || lost;
   const blockedTitle = lost ? 'Re-attach the note first' : (note.unpublishableReason ?? '');
@@ -227,7 +203,7 @@ function NoteCard({ note, onPage }: { note: Note; onPage: boolean }) {
         <span class={`dot ${note.state}`} />
         <span class="state">{STATE_LABEL[note.state]}</span>
         <span class="spacer" />
-        {note.state !== 'published' && <span class={`chip ${NEEDS_ATTENTION.has(note.anchorStatus) ? 'warn' : 'ok'}`}>{note.anchorStatus}</span>}
+        <span class={`chip ${NEEDS_ATTENTION.has(note.anchorStatus) ? 'warn' : 'ok'}`}>{note.anchorStatus}</span>
       </header>
       <button class="quote" title="Show on page" disabled={!onPage} onClick={() => void jump()}>
         “{note.target.exact.length > 200 ? note.target.exact.slice(0, 199) + '…' : note.target.exact}”
@@ -235,88 +211,144 @@ function NoteCard({ note, onPage }: { note: Note; onPage: boolean }) {
       {changed && <div class="hint warn">Was: “{note.target.originalExact.slice(0, 160)}”</div>}
       {note.anchorStatus === 'orphaned' && <div class="hint warn">The text is gone. Select new text on the page and click Re-attach.</div>}
       {note.anchorStatus === 'ambiguous' && <div class="hint warn">The text appears several times. Select the right one and click Re-attach.</div>}
-      {editing ? (
-        note.state === 'published' ? (
-          <InlineEditor
-            note={note}
-            onDone={() => setEditing(false)}
-            onSave={(body) => act({ type: 'edit-published', noteId: note.id, body }, note.page.site)}
-            saveLabel="Update comment"
-            hint="Saving changes the comment in Confluence for everyone."
-          />
-        ) : (
-          <InlineEditor note={note} onDone={() => setEditing(false)} />
-        )
-      ) : (
-        <Body doc={note.body} />
-      )}
-      {note.state === 'published' && <Thread note={note} />}
+      {editing ? <InlineEditor body={note.body} onDone={() => setEditing(false)} onSave={(body) => saveLocal(note, body)} /> : <Body doc={note.body} />}
       {note.lastError && <div class="hint err">{note.lastError}</div>}
       {msg && <div class="hint err">{msg}</div>}
       {!editing && (
         <div class="actions">
-          {note.state === 'published' ? (
-            <>
-              {onPage ? (
-                <button class="b" title="Scroll to the comment and open it" onClick={() => void jump()}>
-                  Jump to comment
-                </button>
-              ) : (
-                commentUrl && (
-                  <button class="b" onClick={() => void openInTab(commentUrl)}>
-                    Open comment
-                  </button>
-                )
-              )}
-              {note.published?.thread?.resolution !== 'deleted' && (
-                <button class="b" title="Change the comment's text in Confluence" onClick={() => setEditing(true)}>
-                  Edit comment
-                </button>
-              )}
-              <span class="spacer" />
-              <button class="b danger" title="Delete the comment in Confluence and keep the note as a private note" onClick={() => void unpublishIt()}>
-                Unpublish
-              </button>
-            </>
+          {onPage && (
+            <button class="b" title="Scroll to the note and open it" onClick={() => void jump()}>
+              Jump to
+            </button>
+          )}
+          <button class="b" onClick={() => setEditing(true)}>
+            Edit
+          </button>
+          {note.state === 'private' ? (
+            <button class="b" disabled={!note.publishable} title={note.unpublishableReason ?? ''} onClick={() => void setState('draft')}>
+              Make draft
+            </button>
           ) : (
-            <>
-              {onPage && (
-                <button class="b" title="Scroll to the note and open it" onClick={() => void jump()}>
-                  Jump to
-                </button>
-              )}
-              <button class="b" onClick={() => setEditing(true)}>
-                Edit
+            <button class="b" onClick={() => void setState('private')}>
+              Make private
+            </button>
+          )}
+          {onPage && (
+            <button class="b" disabled={publishBlocked} title={blockedTitle} onClick={() => void toTab({ type: 'publish-now', noteId: note.id })}>
+              Publish now
+            </button>
+          )}
+          {onPage && (NEEDS_ATTENTION.has(note.anchorStatus) || changed) && (
+            <button class="b" title="Attach the note to the text currently selected on the page" onClick={() => void reattach()}>
+              Re-attach
+            </button>
+          )}
+          {changed && (
+            <button class="b" title="Accept the new text as the note's text" onClick={() => void store.update(note.id, { target: { ...note.target, originalExact: note.target.exact }, anchorStatus: 'anchored' })}>
+              Accept new text
+            </button>
+          )}
+          <span class="spacer" />
+          <button class="b danger" onClick={() => confirm('Delete this note?') && void store.delete(note.id)}>
+            Delete
+          </button>
+        </div>
+      )}
+    </article>
+  );
+}
+
+/** A comment read from Confluence: yours (published here or not) or someone else's. */
+function CommentCard({ comment: c, seenAt, onPage }: { comment: CommentRecord; seenAt: string | null; onPage: boolean }) {
+  const [editing, setEditing] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const unread = new Set(unreadReplies(c, seenAt).map((r) => r.id));
+  const url = c.webUrl ? new URL(c.webUrl, `https://${c.page.site}`).href : null;
+  const deleted = c.resolution === 'deleted';
+  const jump = async () => {
+    setMsg(null);
+    // Confluence's thread shows the replies.
+    if (unread.size) markRead(c);
+    if (onPage && (await toTab<boolean>({ type: 'jump-to-comment', commentId: c.id }))) return;
+    // Not on the page (anymore): open the comment's own URL in the same tab.
+    if (url) await openInTab(url);
+    else setMsg('Could not find this comment on the page.');
+  };
+  const unpublishIt = async () => {
+    if (!confirm(unpublishQuestion(c))) return;
+    setMsg(await act({ type: 'unpublish', site: c.page.site, commentId: c.id }, c.page.site));
+  };
+  const tone = c.resolution === 'resolved' ? 'ok' : deleted || c.resolution === 'dangling' ? 'warn' : '';
+  return (
+    <article class={`note comment ${c.mine ? 'mine' : 'others'}`}>
+      <header>
+        <span class="dot published" />
+        <span class="state">{c.mine ? 'Your comment' : `Comment by ${authorOf(c)}`}</span>
+        <span class="spacer" />
+        <span class={`chip ${tone}`}>{commentLabel(c)}</span>
+        {unread.size > 0 && <span class="chip new">{unread.size} new</span>}
+      </header>
+      {c.quote && (
+        <button class="quote" title={onPage ? 'Show on page' : 'Open the comment'} disabled={!onPage && !url} onClick={() => void jump()}>
+          “{c.quote.length > 200 ? c.quote.slice(0, 199) + '…' : c.quote}”
+        </button>
+      )}
+      {editing ? (
+        <InlineEditor
+          body={c.body}
+          onDone={() => setEditing(false)}
+          onSave={(body) => act({ type: 'edit-comment', site: c.page.site, commentId: c.id, body }, c.page.site)}
+          saveLabel="Update comment"
+          hint="Saving changes the comment in Confluence for everyone."
+        />
+      ) : (
+        <Body doc={c.body} />
+      )}
+      {c.replies.length > 0 && (
+        <div class="thread">
+          {c.replies.map((r) => (
+            <div class={`reply ${unread.has(r.id) ? 'unread' : ''}`}>
+              <span class="who">{r.mine ? 'You' : (r.authorName ?? 'Someone')}</span> <span class="muted">{r.createdAt ? new Date(r.createdAt).toLocaleString() : ''}</span>
+              <div>{r.text}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {msg && <div class="hint err">{msg}</div>}
+      {!editing && (
+        <div class="actions">
+          {onPage && !deleted ? (
+            <button class="b" title="Scroll to the comment and open it" onClick={() => void jump()}>
+              Jump to comment
+            </button>
+          ) : (
+            url &&
+            !deleted && (
+              <button class="b" onClick={() => void openInTab(url)}>
+                Open comment
               </button>
-              {note.state === 'private' ? (
-                <button class="b" disabled={!note.publishable} title={note.unpublishableReason ?? ''} onClick={() => void setState('draft')}>
-                  Make draft
-                </button>
-              ) : (
-                <button class="b" onClick={() => void setState('private')}>
-                  Make private
-                </button>
-              )}
-              {onPage && (
-                <button class="b" disabled={publishBlocked} title={blockedTitle} onClick={() => void toTab({ type: 'publish-now', noteId: note.id })}>
-                  Publish now
-                </button>
-              )}
-              {onPage && (NEEDS_ATTENTION.has(note.anchorStatus) || changed) && (
-                <button class="b" title="Attach the note to the text currently selected on the page" onClick={() => void reattach()}>
-                  Re-attach
-                </button>
-              )}
-              {changed && (
-                <button class="b" title="Accept the new text as the note's text" onClick={() => void store.update(note.id, { target: { ...note.target, originalExact: note.target.exact }, anchorStatus: 'anchored' })}>
-                  Accept new text
-                </button>
-              )}
-              <span class="spacer" />
-              <button class="b danger" onClick={() => confirm('Delete this note?') && void store.delete(note.id)}>
-                Delete
-              </button>
-            </>
+            )
+          )}
+          {unread.size > 0 && (
+            <button class="b" onClick={() => markRead(c)}>
+              Mark read
+            </button>
+          )}
+          {c.mine && !deleted && (
+            <button class="b" title="Change the comment's text in Confluence" onClick={() => setEditing(true)}>
+              Edit comment
+            </button>
+          )}
+          <span class="spacer" />
+          {c.mine && !deleted && (
+            <button class="b danger" title="Delete the comment in Confluence and keep it as a private note" onClick={() => void unpublishIt()}>
+              Unpublish
+            </button>
+          )}
+          {deleted && (
+            <button class="b" title="Remove it from this list" onClick={() => void store.removeComments([c])}>
+              Forget
+            </button>
           )}
         </div>
       )}
@@ -375,7 +407,7 @@ function SearchBox({ value, onInput, placeholder, query }: { value: string; onIn
   );
 }
 
-function PageView({ info, notes, sessions }: { info: PageInfo | null; notes: Note[]; sessions: DraftSession[] }) {
+function PageView({ info, notes, comments, seen, sessions }: { info: PageInfo | null; notes: Note[]; comments: CommentRecord[]; seen: Record<string, string>; sessions: DraftSession[] }) {
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
   const query = useMemo(() => parseQuery(q), [q]);
@@ -384,63 +416,113 @@ function PageView({ info, notes, sessions }: { info: PageInfo | null; notes: Not
   }
   const page = info.page;
   const mine = notes.filter((n) => n.page.key === page.key).sort((a, b) => a.target.start - b.target.start);
-  const shown = mine.filter((n) => (filter === 'all' ? true : filter === 'attention' ? needsAttention(n) : n.state === filter) && matches(n, query));
-  const count = (f: Filter) => mine.filter((n) => (f === 'all' ? true : f === 'attention' ? needsAttention(n) : n.state === f)).length;
+  const here = comments.filter((c) => c.page.key === page.key).map((c) => commentEntry(c, seen)).sort(byCreated);
+  // A filter in the query (e.g. is:resolved) picks the kind; otherwise the chip does.
+  const kind: EntryKind = query.kind ?? (filter === 'comments' ? 'comment' : 'note');
+  const count = (f: Filter) => (f === 'comments' ? here.length : mine.filter((n) => inFilter(n, f)).length);
+  const shownNotes = kind === 'note' ? mine.filter((n) => (query.kind || filter === 'comments' ? true : inFilter(n, filter)) && matches(noteEntry(n), query)) : [];
+  const shownComments = kind === 'comment' ? here.filter((e) => matches(e, query)) : [];
+  const shown = shownNotes.length + shownComments.length;
   const session = sessions.find((s) => s.pageKey === page.key) ?? null;
   const drafts = count('draft');
+  const empty =
+    kind === 'comment'
+      ? here.length
+        ? 'No comments match.'
+        : 'No inline comments on this page.'
+      : mine.length
+        ? 'No notes match.'
+        : 'No notes on this page yet. Select text and click “Add note”.';
   return (
     <>
       <h1 title={page.title}>{page.title}</h1>
       <SessionPanel pageKey={page.key} drafts={drafts} session={session} />
       <div class="filters">
-        {(['all', 'private', 'draft', 'published', 'attention'] as Filter[]).map((f) => (
+        {(['all', 'private', 'draft', 'attention', 'comments'] as Filter[]).map((f) => (
           <button class={`filter ${filter === f ? 'on' : ''}`} onClick={() => setFilter(f)}>
-            {f === 'all' ? 'All' : f === 'attention' ? 'Needs attention' : STATE_LABEL[f as NoteState]} <span>{count(f)}</span>
+            {FILTER_LABEL[f]} <span>{count(f)}</span>
           </button>
         ))}
       </div>
-      {mine.length > 0 && <SearchBox value={q} onInput={setQ} placeholder="Search notes on this page" query={query} />}
-      {shown.length === 0 ? (
-        <p class="empty">{mine.length ? 'No notes match.' : 'No notes on this page yet. Select text and click “Add note”.'}</p>
-      ) : (
-        shown.map((n) => <NoteCard key={n.id} note={n} onPage />)
+      {(mine.length > 0 || here.length > 0) && (
+        <SearchBox value={q} onInput={setQ} placeholder={kind === 'comment' ? 'Search comments on this page' : 'Search notes on this page'} query={query} />
       )}
+      {shown === 0 && <p class="empty">{empty}</p>}
+      {shownNotes.map((n) => (
+        <NoteCard key={n.id} note={n} onPage />
+      ))}
+      {shownComments.map((e) => (
+        <CommentCard key={e.comment.id} comment={e.comment} seenAt={e.seenAt} onPage />
+      ))}
     </>
   );
 }
 
-function Snippet({ note, query }: { note: Note; query: Query }) {
+function Snippet({ entry, query }: { entry: Entry; query: Query }) {
   return (
     <div class="snippet">
-      {snippet(note, query).map((p) => (p.hit ? <mark>{p.text}</mark> : p.text))}
+      {snippet(entry, query).map((p) => (p.hit ? <mark>{p.text}</mark> : p.text))}
     </div>
   );
 }
 
-function AllView({ notes, currentKey }: { notes: Note[]; currentKey: string | null }) {
+function groupByPage<T>(items: T[], pageOf: (x: T) => Note['page'], time: (x: T) => string): T[][] {
+  const m = new Map<string, T[]>();
+  for (const x of items) {
+    const k = pageOf(x).key;
+    if (!m.has(k)) m.set(k, []);
+    m.get(k)!.push(x);
+  }
+  const latest = (g: T[]) => Math.max(...g.map((x) => Date.parse(time(x)) || 0));
+  return [...m.values()].sort((a, b) => latest(b) - latest(a));
+}
+
+function AllView({ notes, comments, seen, currentKey }: { notes: Note[]; comments: CommentRecord[]; seen: Record<string, string>; currentKey: string | null }) {
+  const [tab, setTab] = useState<EntryKind>('note');
   const [q, setQ] = useState('');
   const query = useMemo(() => parseQuery(q), [q]);
   const searching = !isEmptyQuery(query);
-  const groups = useMemo(() => {
-    const m = new Map<string, Note[]>();
-    for (const n of notes) {
-      if (!matches(n, query)) continue;
-      if (!m.has(n.page.key)) m.set(n.page.key, []);
-      m.get(n.page.key)!.push(n);
-    }
-    return [...m.values()].sort((a, b) => Math.max(...b.map((n) => Date.parse(n.updatedAt))) - Math.max(...a.map((n) => Date.parse(n.updatedAt))));
-  }, [notes, query]);
+  const kind = query.kind ?? tab;
+  const noteGroups = useMemo(
+    () => (kind === 'note' ? groupByPage(notes.filter((n) => matches(noteEntry(n), query)), (n) => n.page, (n) => n.updatedAt) : []),
+    [notes, query, kind],
+  );
+  const commentGroups = useMemo(
+    () =>
+      kind === 'comment'
+        ? groupByPage(
+            comments.map((c) => commentEntry(c, seen)).filter((e) => matches(e, query)),
+            (e) => e.comment.page,
+            (e) => e.comment.createdAt ?? '',
+          )
+        : [],
+    [comments, seen, query, kind],
+  );
+  const groups = kind === 'note' ? noteGroups : commentGroups;
   const hits = groups.reduce((a, g) => a + g.length, 0);
+  const noun = kind === 'note' ? 'note' : 'comment';
+  const open = (p: Note['page'], local: () => void) => void (p.key === currentKey ? local() : openInTab(p.url));
   return (
     <>
-      <SearchBox value={q} onInput={setQ} placeholder="Search all notes, e.g. solver is:draft" query={query} />
-      {searching && groups.length > 0 && (
+      <div class="filters">
+        {(['note', 'comment'] as EntryKind[]).map((k) => (
+          <button class={`filter ${kind === k ? 'on' : ''}`} onClick={() => setTab(k)}>
+            {k === 'note' ? 'Notes' : 'Comments'} <span>{k === 'note' ? notes.length : comments.length}</span>
+          </button>
+        ))}
+      </div>
+      <SearchBox value={q} onInput={setQ} placeholder={kind === 'note' ? 'Search all notes, e.g. solver is:draft' : 'Search comments, e.g. solver by:me is:open'} query={query} />
+      {searching && hits > 0 && (
         <p class="hint">
-          {hits} note{hits === 1 ? '' : 's'} on {groups.length} page{groups.length === 1 ? '' : 's'}
+          {hits} {noun}
+          {hits === 1 ? '' : 's'} on {groups.length} page{groups.length === 1 ? '' : 's'}
         </p>
       )}
-      {groups.length === 0 && <p class="empty">{searching ? 'No notes match.' : 'No notes yet.'}</p>}
-      {groups.map((g) => {
+      {kind === 'comment' && !searching && (
+        <p class="hint">Inline comments on the pages you opened (yours and other people's) and the comments you published with margin-notes. They are read from Confluence when you open a page.</p>
+      )}
+      {hits === 0 && <p class="empty">{searching ? `No ${noun}s match.` : `No ${noun}s yet.`}</p>}
+      {noteGroups.map((g) => {
         const p = g[0]!.page;
         return (
           <section class="group">
@@ -451,21 +533,54 @@ function AllView({ notes, currentKey }: { notes: Note[]; currentKey: string | nu
               {g
                 .sort((a, b) => a.target.start - b.target.start)
                 .map((n) => (
-                  <li
-                    class="jump"
-                    title={n.page.key === currentKey ? 'Jump to this note' : 'Open the page'}
-                    onClick={() => void (n.page.key === currentKey ? toTab({ type: 'jump-to', noteId: n.id }) : openInTab(p.url))}
-                  >
+                  <li class="jump" title={n.page.key === currentKey ? 'Jump to this note' : 'Open the page'} onClick={() => open(p, () => void toTab({ type: 'jump-to', noteId: n.id }))}>
                     <div class="line">
                       <span class={`dot ${n.state}`} title={STATE_LABEL[n.state]} />
                       <span class="q">“{n.target.exact.slice(0, 80)}”</span>
                       {needsAttention(n) && <span class="chip warn">{n.anchorStatus}</span>}
-                      {n.published?.thread?.resolution === 'resolved' && <span class="chip ok">resolved</span>}
-                      {unreadReplies(n).length > 0 && <span class="chip new">{unreadReplies(n).length} new</span>}
                     </div>
-                    {searching && <Snippet note={n} query={query} />}
+                    {searching && <Snippet entry={noteEntry(n)} query={query} />}
                   </li>
                 ))}
+            </ul>
+          </section>
+        );
+      })}
+      {commentGroups.map((g) => {
+        const p = g[0]!.comment.page;
+        return (
+          <section class="group">
+            <button class="page-link" onClick={() => void openInTab(p.url)} title={p.url}>
+              {p.title || p.url}
+            </button>
+            <ul>
+              {g.sort(byCreated).map((e) => {
+                const c = e.comment;
+                const unread = unreadReplies(c, e.seenAt).length;
+                const url = c.webUrl ? new URL(c.webUrl, `https://${c.page.site}`).href : p.url;
+                return (
+                  <li
+                    class="jump"
+                    title={c.page.key === currentKey ? 'Jump to this comment' : 'Open the comment'}
+                    onClick={() => {
+                      if (unread) markRead(c);
+                      // Elsewhere, the comment's own URL makes Confluence open its thread.
+                      if (c.page.key === currentKey) void toTab({ type: 'jump-to-comment', commentId: c.id });
+                      else void openInTab(url);
+                    }}
+                  >
+                    <div class="line">
+                      <span class={`dot ${c.mine ? 'published' : ''}`} title={authorOf(c)} />
+                      <span class="q">“{c.quote.slice(0, 80)}”</span>
+                      {!c.mine && <span class="muted">{authorOf(c)}</span>}
+                      {c.resolution === 'resolved' && <span class="chip ok">resolved</span>}
+                      {c.resolution === 'deleted' && <span class="chip warn">deleted</span>}
+                      {unread > 0 && <span class="chip new">{unread} new</span>}
+                    </div>
+                    {searching && <Snippet entry={e} query={query} />}
+                  </li>
+                );
+              })}
             </ul>
           </section>
         );
@@ -620,11 +735,16 @@ function App() {
   const tick = useStorageTick();
   const [view, setView] = useState<View>('page');
   const [notes, setNotes] = useState<Note[]>([]);
+  const [comments, setComments] = useState<CommentRecord[]>([]);
+  const [seen, setSeen] = useState<Record<string, string>>({});
   const [sessions, setSessions] = useState<DraftSession[]>([]);
   const [info] = usePageInfo(tick);
-  const unread = notes.filter((n) => unreadReplies(n).length > 0).length;
+  const unread = comments.filter((c) => unreadReplies(c, seen[commentKey(c.page.site, c.id)] ?? null).length > 0).length;
   useEffect(() => {
-    void store.allNotes().then(setNotes);
+    // Published notes are tombstones; their comments are listed from the comment cache.
+    void store.allNotes().then((all) => setNotes(all.filter((n) => n.state !== 'published')));
+    void store.allComments().then(setComments);
+    void store.seen().then(setSeen);
     void store.allSessions().then(setSessions);
   }, [tick]);
   return (
@@ -638,8 +758,8 @@ function App() {
         ))}
       </nav>
       <main>
-        {view === 'page' && <PageView info={info} notes={notes} sessions={sessions} />}
-        {view === 'all' && <AllView notes={notes} currentKey={info?.page?.key ?? null} />}
+        {view === 'page' && <PageView info={info} notes={notes} comments={comments} seen={seen} sessions={sessions} />}
+        {view === 'all' && <AllView notes={notes} comments={comments} seen={seen} currentKey={info?.page?.key ?? null} />}
         {view === 'settings' && <SettingsView tick={tick} info={info} />}
       </main>
     </div>

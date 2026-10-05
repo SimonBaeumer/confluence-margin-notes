@@ -42,5 +42,5 @@ export function parseSyncPage(storage: string, now: string): SyncDoc {
   if (doc?.format !== 'margin-notes-sync' || !Array.isArray(doc.notes)) {
     throw new Error('The sync page does not hold margin-notes data. It was not overwritten.');
   }
-  return { ...doc, purged: doc.purged ?? {} };
+  return { ...doc, purged: doc.purged ?? {}, seen: doc.seen ?? {} };
 }

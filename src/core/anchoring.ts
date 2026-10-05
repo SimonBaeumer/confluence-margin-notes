@@ -14,7 +14,7 @@
 
 import search from 'approx-string-match';
 import DiffMatchPatch from 'diff-match-patch';
-import { blockAt, blockByLocalId, type PageTextIndex } from './adf-text';
+import { blockAt, blockByLocalId, matchOffsets, type PageTextIndex } from './adf-text';
 import type { AnchorStatus, Target } from './model';
 
 export const CONTEXT_LENGTH = 64;
@@ -55,6 +55,25 @@ export function describe(index: PageTextIndex, start: number, end: number, pageV
     suffix: index.text.slice(end, end + CONTEXT_LENGTH),
     originalExact: exact,
     originalVersion: pageVersion,
+  };
+}
+
+/**
+ * A target for text known only by its quote, e.g. a comment turned back into
+ * a note. Several matches take the first one and report "ambiguous", none
+ * gives an "orphaned" target that keeps the quote for re-attaching.
+ */
+export function targetForQuote(index: PageTextIndex, quote: string, pageVersion: number): { target: Target; status: AnchorStatus } {
+  const hits = matchOffsets(index.text, quote);
+  if (hits.length) {
+    return { target: describe(index, hits[0]!, hits[0]! + quote.length, pageVersion), status: hits.length === 1 ? 'anchored' : 'ambiguous' };
+  }
+  return {
+    target: {
+      pageVersion, startBlockLocalId: null, endBlockLocalId: null, startBlockOffset: 0, endBlockOffset: 0,
+      start: 0, end: 0, exact: quote, prefix: '', suffix: '', originalExact: quote, originalVersion: pageVersion,
+    },
+    status: 'orphaned',
   };
 }
 

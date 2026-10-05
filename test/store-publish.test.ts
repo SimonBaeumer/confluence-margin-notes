@@ -99,7 +99,12 @@ describe('publish pipeline', () => {
     expect(r.ok).toBe(true);
     expect(state.posts[0].inlineCommentProperties).toEqual({ textSelection: 'XFRROperatingPoint', textSelectionMatchCount: 3, textSelectionMatchIndex: 2 });
     expect(JSON.parse(state.posts[0].body.value)).toEqual(note.body);
-    expect((await store.get(note.id))!.state).toBe('published');
+    // The note graduates: a tombstone, plus the comment as a record read from Confluence from now on.
+    expect((await store.get(note.id))!).toMatchObject({ state: 'published', deleted: true });
+    expect(await store.allNotes()).toEqual([]);
+    const [c] = await store.allComments();
+    expect(c).toMatchObject({ id: r.ok ? r.commentId : '', mine: true, quote: 'XFRROperatingPoint', checkedAt: null });
+    expect(await store.seenAt(`${note.page.site}:${c!.id}`)).not.toBeNull();
   });
 
   it('recomputes the index after the page changed before publishing', async () => {
