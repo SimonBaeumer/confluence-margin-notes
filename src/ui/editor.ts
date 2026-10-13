@@ -44,6 +44,17 @@ function wrapSelectionInCode(doc: Document): void {
   sel.addRange(after);
 }
 
+/** What Backspace/Delete would have done: a character, or a word/line with Alt/Ctrl/Cmd. */
+function deleteAtSelection(doc: Document, e: KeyboardEvent): void {
+  const forward = e.key === 'Delete';
+  const sel = doc.getSelection();
+  if (sel && sel.isCollapsed && (e.altKey || e.ctrlKey || e.metaKey)) {
+    const unit = e.metaKey && !e.ctrlKey ? 'lineboundary' : 'word';
+    sel.modify('extend', forward ? 'forward' : 'backward', unit);
+  }
+  doc.execCommand(forward ? 'forwardDelete' : 'delete');
+}
+
 export function createEditor(doc: Document, initial: AdfDoc | null, placeholder = 'Write a note…'): Editor {
   const el = doc.createElement('div');
   el.className = 'mn-editor';
@@ -107,6 +118,10 @@ export function createEditor(doc: Document, initial: AdfDoc | null, placeholder 
     } else if (mod && e.key.toLowerCase() === 'k') {
       e.preventDefault();
       link();
+    } else if ((e.key === 'Backspace' || e.key === 'Delete') && e.defaultPrevented) {
+      // Confluence's capture-phase key handlers only see our shadow host, which is
+      // not editable, and cancel Backspace/Delete. Do the deletion ourselves.
+      deleteAtSelection(doc, e);
     }
     // Keep Confluence's global shortcuts (e.g. "e" to edit, "?" for help) away from our input.
     e.stopPropagation();
