@@ -162,7 +162,9 @@ export class Overlay {
     style.textContent = CSS_TEXT;
     this.wrap = h(doc, 'div', { class: 'mn' });
     this.shadow.append(style, this.wrap);
-    doc.documentElement.append(this.host);
+    // Inside <body>: Firefox's editor refuses to delete text in a contenteditable
+    // outside it (Backspace, Delete and typing over a selection do nothing).
+    (doc.body ?? doc.documentElement).append(this.host);
     // Keep clicks inside our UI from reaching the page (and from clearing our state).
     for (const t of ['mousedown', 'mouseup', 'click', 'keydown', 'keyup', 'keypress']) {
       this.host.addEventListener(t, (e) => e.stopPropagation());
