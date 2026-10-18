@@ -75,3 +75,8 @@ textarea { min-height: 52px; resize: vertical; }
 .snippet { font-size: 12px; color: var(--mn-muted); padding-left: 15px; }
 .snippet mark { background: var(--mn-private); color: #172b4d; border-radius: 2px; }
 .settings a { color: var(--mn-link); }
+.reply-draft { display: flex; flex-direction: column; gap: 4px; border: 1px dashed var(--mn-draft); border-radius: 6px; padding: 6px 8px; }
+.reply-draft.private { border-color: var(--mn-private); }
+.reply-draft .state { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--mn-muted); }
+.reply-draft .quote-line { font-size: 12px; }
+.chip.draft { color: var(--mn-draft); border-color: var(--mn-draft); }

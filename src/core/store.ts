@@ -1,13 +1,13 @@
 // NoteStore on top of storage.local.
 //
-// One key per note ("note:<id>"), per draft session ("session:<pageKey>"), per
-// cached Confluence comment ("comment:<site>:<id>") and per seen-map entry
-// ("seen:<site>:<id>"), so concurrent writers (content script, sidebar) never
+// One key per note ("note:<id>"), per reply draft ("reply:<id>"), per draft
+// session ("session:<pageKey>"), per cached Confluence comment
+// ("comment:<site>:<id>") and per seen-map entry ("seen:<site>:<id>"), so concurrent writers (content script, sidebar) never
 // overwrite each other's records. Every context reads and writes storage directly and listens to
 // storage.onChanged; the background page is not a bottleneck.
 
 import { graduate, isGraduated, needsGraduation, commentFromNote } from './graduate';
-import { SCHEMA_VERSION, commentKey, nowIso, type CommentRecord, type DraftSession, type Note } from './model';
+import { SCHEMA_VERSION, commentKey, nowIso, type CommentRecord, type DraftSession, type Note, type ReplyDraft } from './model';
 
 export interface StorageAreaLike {
   get(keys?: string | string[] | null): Promise<Record<string, unknown>>;
@@ -20,6 +20,8 @@ export interface ExportFile {
   schemaVersion: number;
   exportedAt: string;
   notes: Note[];
+  /** Absent in exports from older versions. */
+  replies?: ReplyDraft[];
   sessions: DraftSession[];
 }
 
@@ -27,6 +29,7 @@ const NOTE = 'note:';
 const SESSION = 'session:';
 const COMMENT = 'comment:';
 const SEEN = 'seen:';
+const REPLY = 'reply:';
 
 export class NoteStore {
   constructor(private readonly area: StorageAreaLike) {}
@@ -106,6 +109,42 @@ export class NoteStore {
   /** Soft delete: the tombstone lets v2 sync propagate the deletion. */
   async delete(id: string): Promise<void> {
     await this.update(id, { deleted: true });
+  }
+
+  // ---- reply drafts ---------------------------------------------------------------
+
+  async allReplies(includeDeleted = false): Promise<ReplyDraft[]> {
+    const all = await this.area.get(null);
+    const replies = Object.entries(all)
+      .filter(([k]) => k.startsWith(REPLY))
+      .map(([, v]) => v as ReplyDraft);
+    return includeDeleted ? replies : replies.filter((r) => !r.deleted);
+  }
+
+  async repliesForPage(pageKey: string): Promise<ReplyDraft[]> {
+    return (await this.allReplies()).filter((r) => r.page.key === pageKey);
+  }
+
+  async getReply(id: string): Promise<ReplyDraft | null> {
+    const r = await this.area.get(REPLY + id);
+    return (r[REPLY + id] as ReplyDraft | undefined) ?? null;
+  }
+
+  async putReply(reply: ReplyDraft): Promise<ReplyDraft> {
+    const stored = { ...reply, schemaVersion: SCHEMA_VERSION, updatedAt: nowIso() };
+    await this.area.set({ [REPLY + reply.id]: stored });
+    return stored;
+  }
+
+  async updateReply(id: string, patch: Partial<ReplyDraft>): Promise<ReplyDraft | null> {
+    const cur = await this.getReply(id);
+    if (!cur) return null;
+    return this.putReply({ ...cur, ...patch });
+  }
+
+  /** Soft delete, like notes. */
+  async deleteReply(id: string): Promise<void> {
+    await this.updateReply(id, { deleted: true });
   }
 
   // ---- comments read from Confluence ---------------------------------------------
@@ -201,10 +240,13 @@ export class NoteStore {
     await this.area.remove(SESSION + pageKey);
   }
 
-  /** Discard draft comments: drafts go back to private, nothing is deleted. */
+  /** Discard draft comments: drafts (and draft replies) go back to private, nothing is deleted. */
   async discardSession(pageKey: string): Promise<void> {
     for (const n of await this.notesForPage(pageKey)) {
       if (n.state === 'draft') await this.put({ ...n, state: 'private', lastError: null });
+    }
+    for (const r of await this.repliesForPage(pageKey)) {
+      if (r.state === 'draft') await this.putReply({ ...r, state: 'private', lastError: null });
     }
     await this.endSession(pageKey);
   }
@@ -216,22 +258,32 @@ export class NoteStore {
    * is left alone and goes out with the next sync. Returns the number of notes changed.
    */
   async applyRemote(writes: Note[], removes: string[], expected: Map<string, string>): Promise<number> {
+    return this.applyRemoteAt(NOTE, writes, removes, expected);
+  }
+
+  /** applyRemote() for reply drafts. */
+  async applyRemoteReplies(writes: ReplyDraft[], removes: string[], expected: Map<string, string>): Promise<number> {
+    return this.applyRemoteAt(REPLY, writes, removes, expected);
+  }
+
+  private async applyRemoteAt(prefix: string, writes: { id: string }[], removes: string[], expected: Map<string, string>): Promise<number> {
     const ids = [...writes.map((n) => n.id), ...removes];
     if (!ids.length) return 0;
-    const cur = await this.area.get(ids.map((id) => NOTE + id));
-    const unchanged = (id: string) => fingerprint(cur[NOTE + id] as Note | undefined) === (expected.get(id) ?? fingerprint(undefined));
+    const cur = await this.area.get(ids.map((id) => prefix + id));
+    const unchanged = (id: string) => fingerprint(cur[prefix + id] as Note | ReplyDraft | undefined) === (expected.get(id) ?? fingerprint(undefined));
     const items: Record<string, unknown> = {};
-    for (const n of writes) if (unchanged(n.id)) items[NOTE + n.id] = n;
-    const gone = removes.filter((id) => unchanged(id) && cur[NOTE + id]).map((id) => NOTE + id);
+    for (const n of writes) if (unchanged(n.id)) items[prefix + n.id] = n;
+    const gone = removes.filter((id) => unchanged(id) && cur[prefix + id]).map((id) => prefix + id);
     if (Object.keys(items).length) await this.area.set(items);
     if (gone.length) await this.area.remove(gone);
     return Object.keys(items).length + gone.length;
   }
 
-  /** Removes deleted notes (tombstones) whose deletion is older than `cutoff`. Returns how many. */
+  /** Removes deleted notes and reply drafts (tombstones) whose deletion is older than `cutoff`. Returns how many. */
   async purgeDeleted(cutoff: string): Promise<number> {
-    const old = (await this.allNotes(true)).filter((n) => n.deleted && n.updatedAt < cutoff);
-    if (old.length) await this.area.remove(old.map((n) => NOTE + n.id));
+    const old = (await this.allNotes(true)).filter((n) => n.deleted && n.updatedAt < cutoff).map((n) => NOTE + n.id);
+    old.push(...(await this.allReplies(true)).filter((r) => r.deleted && r.updatedAt < cutoff).map((r) => REPLY + r.id));
+    if (old.length) await this.area.remove(old);
     return old.length;
   }
 
@@ -241,6 +293,7 @@ export class NoteStore {
       schemaVersion: SCHEMA_VERSION,
       exportedAt: nowIso(),
       notes: await this.allNotes(true),
+      replies: await this.allReplies(true),
       sessions: await this.allSessions(),
     };
   }
@@ -257,6 +310,13 @@ export class NoteStore {
         taken++;
       }
     }
+    for (const r of file.replies ?? []) {
+      const cur = await this.getReply(r.id);
+      if (!cur || cur.updatedAt < r.updatedAt) {
+        items[REPLY + r.id] = r;
+        taken++;
+      }
+    }
     for (const s of file.sessions) {
       const cur = await this.session(s.pageKey);
       if (!cur || cur.updatedAt < s.updatedAt) items[SESSION + s.pageKey] = s;
@@ -268,13 +328,17 @@ export class NoteStore {
   }
 }
 
-/** Identifies one stored version of a note (updatedAt alone can repeat within a millisecond). */
-export function fingerprint(note: Note | undefined): string {
+/** Identifies one stored version of a note or reply draft (updatedAt alone can repeat within a millisecond). */
+export function fingerprint(note: Note | ReplyDraft | undefined): string {
   return note ? JSON.stringify(note) : '';
 }
 
 export function isNoteKey(key: string): boolean {
   return key.startsWith(NOTE);
+}
+
+export function isReplyKey(key: string): boolean {
+  return key.startsWith(REPLY);
 }
 
 export function isSessionKey(key: string): boolean {

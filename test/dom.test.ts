@@ -2,7 +2,7 @@
 // DomMapper against real rendered Confluence pages, saved with their ADF.
 import { readFileSync } from 'node:fs';
 import { buildIndex } from '../src/core/adf-text';
-import { DomMapper, findCommentMark, findRoot } from '../src/confluence/dom';
+import { confirmDiscardComment, DomMapper, findCommentMark, findCommentThread, findRoot } from '../src/confluence/dom';
 
 function load(name: string) {
   const { adf, html } = JSON.parse(readFileSync(`test/fixtures/${name}`, "utf8"));
@@ -71,5 +71,47 @@ describe('findRoot', () => {
   it('finds the highlight of a published comment by its marker ref', () => {
     expect(findCommentMark(findRoot()!, 'ref-1')?.textContent).toBe('body');
     expect(findCommentMark(findRoot()!, 'ref-2')).toBeNull();
+  });
+});
+
+// Confluence's inline comment thread popup, cut down to the test ids margin-notes uses (as seen on Confluence Cloud, October 2026).
+const THREAD = `
+<div data-testid="renderer-comments-sidebar" role="dialog" aria-label="Inline comment by Ada Lovelace">
+  <div data-testid="inline-comment-sidebar-wrapper">
+    <div data-testid="inline-comment-container">
+      <div data-comment-id="2116026380">question</div>
+      <div data-testid="comment-thread-2116026380-replies"><div data-comment-id="2116386832">answer</div></div>
+    </div>
+    <div data-testid="inline-comment-new-reply-container">
+      <div contenteditable="true"><p>my reply</p></div>
+      <button data-testid="editor-cancel-inline-comment-action">Cancel</button>
+    </div>
+  </div>
+</div>`;
+
+describe('Confluence comment thread popup', () => {
+  it('finds the thread, its top-level comment and the reply box', () => {
+    document.body.innerHTML = THREAD;
+    const t = findCommentThread(document)!;
+    expect(t.commentId).toBe('2116026380');
+    expect(t.editor?.textContent).toBe('my reply');
+    expect(t.cancel?.textContent).toBe('Cancel');
+    expect(t.wrapper.dataset.testid).toBe('inline-comment-sidebar-wrapper');
+  });
+
+  it('finds nothing while no thread is open', () => {
+    document.body.innerHTML = '<div></div>';
+    expect(findCommentThread(document)).toBeNull();
+  });
+
+  it('answers the discard question once it shows up', async () => {
+    document.body.innerHTML = '';
+    let clicked = false;
+    setTimeout(() => {
+      document.body.innerHTML = '<div data-testid="modal-dialog-comment-warning"><button data-testid="comment-warning-ok-button">Discard</button></div>';
+      document.querySelector('button')!.addEventListener('click', () => (clicked = true));
+    }, 100);
+    expect(await confirmDiscardComment(document, 1000)).toBe(true);
+    expect(clicked).toBe(true);
   });
 });

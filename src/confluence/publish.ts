@@ -5,14 +5,18 @@
 //   publish directly, changed needs a confirmation, ambiguous/orphaned are
 //   blocked -> compute textSelection/count/index from the same snapshot -> POST.
 // Notes run one at a time because every comment changes the page body.
+//
+// Replies have no text of their own to anchor: they only need their comment
+// to still exist. They are posted after the notes.
 
 import { buildIndex, computeMatch, type PageTextIndex } from '../core/adf-text';
 import { anchor, rebase, type AnchorResult } from '../core/anchoring';
-import type { AdfDoc, Note } from '../core/model';
+import type { AdfDoc, Note, ReplyDraft } from '../core/model';
 import { nowIso } from '../core/model';
 import { adfToPlain } from '../core/rich-text';
 import { ConfluenceError, type ConfluenceClient, type PageSnapshot } from './client';
 
+/** `noteId` is the id of the note or reply draft. */
 export type PublishOutcome =
   | { noteId: string; ok: true; commentId: string; webUrl: string | null }
   | { noteId: string; ok: false; skipped: boolean; error: string };
@@ -23,6 +27,8 @@ export interface PublishHooks {
   progress(noteId: string, phase: 'checking' | 'posting' | 'done' | 'failed', detail?: string): void;
   /** Persists a note update. */
   save(note: Note): Promise<void>;
+  /** Persists a reply draft update (a published one is a tombstone with publishedId). */
+  saveReply(reply: ReplyDraft): Promise<void>;
 }
 
 /** Old page versions never change, so their indexes can be cached for the session. */
@@ -172,22 +178,68 @@ export async function publishNote(client: ConfluenceClient, note: Note, hooks: P
   return fail('Confluence rejected the comment twice.');
 }
 
+export async function publishReply(client: ConfluenceClient, reply: ReplyDraft, hooks: PublishHooks): Promise<PublishOutcome> {
+  const fail = async (error: string, skipped = false): Promise<PublishOutcome> => {
+    hooks.progress(reply.id, 'failed', error);
+    await hooks.saveReply({ ...reply, lastError: error });
+    return { noteId: reply.id, ok: false, skipped, error };
+  };
+  const done = async (id: string, webUrl: string | null): Promise<PublishOutcome> => {
+    await hooks.saveReply({ ...reply, deleted: true, publishedId: id, lastError: null });
+    hooks.progress(reply.id, 'done');
+    return { noteId: reply.id, ok: true, commentId: id, webUrl };
+  };
+
+  hooks.progress(reply.id, 'checking');
+  try {
+    await client.getInlineComment(reply.commentId);
+  } catch (e) {
+    if (e instanceof ConfluenceError && (e.status === 404 || e.status === 410)) {
+      return fail('The comment no longer exists in Confluence.', true);
+    }
+    return fail(`Could not load the comment: ${(e as Error).message}`);
+  }
+  hooks.progress(reply.id, 'posting');
+  const startedAt = Date.now();
+  try {
+    const created = await client.createInlineReply(reply.commentId, reply.body);
+    return done(created.id, created.webUrl);
+  } catch (e) {
+    const err = e as Error;
+    if (!(err instanceof ConfluenceError) || err.status >= 500) {
+      // Did the reply get created anyway?
+      try {
+        const want = normalize(adfToPlain(reply.body));
+        const dup = (await client.listReplies(reply.commentId)).find(
+          (r) => normalize(r.bodyText) === want && (!r.createdAt || Date.parse(r.createdAt) >= startedAt - 60_000),
+        );
+        if (dup) return done(dup.id, dup.webUrl);
+      } catch {
+        // Report the original error.
+      }
+    }
+    return fail(err.message);
+  }
+}
+
 export interface SubmitResult {
   outcomes: PublishOutcome[];
   summary: { ok: true; commentId: string } | { ok: false; error: string } | null;
 }
 
-/** Submits all draft comments of a page in document order, then the optional summary. */
+/** Submits all draft comments of a page in document order, then the draft replies, then the optional summary. */
 export async function submitDrafts(
   client: ConfluenceClient,
   pageId: string,
   drafts: Note[],
   summary: AdfDoc | null,
   hooks: PublishHooks,
+  replies: ReplyDraft[] = [],
 ): Promise<SubmitResult> {
   const ordered = [...drafts].sort((a, b) => a.target.start - b.target.start);
   const outcomes: PublishOutcome[] = [];
   for (const n of ordered) outcomes.push(await publishNote(client, n, hooks));
+  for (const r of replies) outcomes.push(await publishReply(client, r, hooks));
   let summaryResult: SubmitResult['summary'] = null;
   if (summary && summary.content.length) {
     try {

@@ -1,9 +1,11 @@
 // In-page UI, rendered into a closed shadow root attached outside Confluence's
 // React tree: the "Add note" button, the note popover, the draft comments
-// banner and the submit dialog.
+// banner, the submit dialog and the reply-draft badges. The strip in
+// Confluence's comment thread popup is the one piece that sits inside
+// Confluence's DOM, in a shadow root of its own (see ThreadStrip).
 
-import { commentLabel, type CommentRecord, type Note, type NoteState } from '../core/model';
-import { adfToFragment } from '../core/rich-text';
+import { commentLabel, type AdfDoc, type CommentRecord, type Note, type NoteState, type ReplyDraft } from '../core/model';
+import { adfToFragment, adfToPlain } from '../core/rich-text';
 import { unpublishQuestion } from '../confluence/comments';
 import { createEditor, EDITOR_CSS, type Editor } from '../ui/editor';
 
@@ -76,6 +78,13 @@ label.lbl { font-size: 12.5px; font-weight: 600; }
 .status-line { font-size: 12px; }
 .thread { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--mn-border); padding-top: 8px; max-height: 180px; overflow: auto; }
 .reply { font-size: 12.5px; } .reply .who { font-weight: 600; } .reply .when { color: var(--mn-muted); font-size: 11.5px; }
+.badge { all: unset; position: fixed; z-index: 2; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px;
+  border-radius: 10px; background: var(--mn-draft); color: #fff; font: 600 11.5px/20px system-ui, sans-serif; box-shadow: 0 1px 4px rgb(0 0 0 / 0.2); }
+.badge.private { background: var(--mn-private); color: #172b4d; }
+.strip { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 4px; padding: 8px 10px; border: 1px dashed var(--mn-draft); border-radius: 8px; }
+.strip .draft-line { display: flex; gap: 6px; align-items: center; font-size: 12.5px; }
+.strip .draft-line .txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.b.small { padding: 2px 8px; font-size: 12px; }
 ${EDITOR_CSS}
 `;
 
@@ -111,8 +120,42 @@ export interface PopoverComment {
   onUnpublish(): Promise<string | null>;
 }
 
+/** One row of the submit dialog: a note, or a reply draft. */
+/** Writing or editing a reply draft in our popover. */
+export interface PopoverReply {
+  /** null: a new reply. */
+  reply: ReplyDraft | null;
+  /** e.g. "Alexander Rothe". */
+  to: string;
+  quote: string;
+  anchorRect: DOMRect;
+  onSave(body: AdfDoc): void;
+  onState(state: ReplyDraft['state']): void;
+  onPublish(): void;
+  onDelete(): void;
+}
+
+/** What the strip in Confluence's thread popup shows. */
+export interface ThreadStripProps {
+  drafts: ReplyDraft[];
+  /** Saves what is typed in Confluence's reply box, or opens our editor when it is empty. */
+  onSaveDraft(anchor: DOMRect): void;
+  onOpen(r: ReplyDraft, anchor: DOMRect): void;
+  onPublish(r: ReplyDraft): void;
+}
+
+export interface ReplyBadge {
+  commentId: string;
+  rect: DOMRect;
+  drafts: number;
+  privates: number;
+}
+
 export interface DialogItem {
-  note: Note;
+  id: string;
+  /** Shown above the body, e.g. the quoted text. */
+  label: string;
+  body: AdfDoc;
   status: string;
   tone: 'ok' | 'warn' | 'err';
   blockedReason: string | null;
@@ -430,6 +473,105 @@ export class Overlay {
     this.popover = pop;
   }
 
+  /** Writes a new reply draft, or edits one. */
+  showReply(p: PopoverReply): void {
+    this.closePopover();
+    this.hideAddButton();
+    const d = this.doc;
+    const r = p.reply;
+    const editor = createEditor(d, r?.body ?? null, `Reply to ${p.to}…`);
+    const emptyHint = h(d, 'div', { class: 'hint err', hidden: true }, 'Write something first.');
+    editor.onChange(() => (emptyHint.hidden = true));
+    const save = (then?: () => void) => {
+      if (editor.isEmpty()) {
+        emptyHint.hidden = false;
+        editor.focus();
+        return;
+      }
+      p.onSave(editor.getDoc());
+      then?.();
+      this.closePopover();
+    };
+    const label = !r ? `Draft reply to ${p.to}` : r.state === 'draft' ? `Draft reply to ${p.to}` : `Private note on ${p.to}'s comment`;
+    const pop = h(
+      d,
+      'div',
+      { class: 'card popover', role: 'dialog', 'aria-label': label },
+      h(d, 'div', { class: 'head' }, h(d, 'span', { class: `dot ${r?.state ?? 'draft'}` }), label, h(d, 'span', { class: 'spacer' }), this.closeX()),
+      h(d, 'div', { class: 'quote' }, truncate(p.quote, 240)),
+      r?.lastError ? h(d, 'div', { class: 'hint err' }, r.lastError) : null,
+      editor.el,
+      emptyHint,
+      r
+        ? h(
+            d,
+            'div',
+            { class: 'row' },
+            h(d, 'button', {
+              class: 'b danger',
+              onclick: (e: Event) =>
+                this.ask((e.currentTarget as HTMLElement).parentElement!, 'Delete this reply draft?', 'Delete', () => (p.onDelete(), this.closePopover())),
+            }, 'Delete'),
+            h(d, 'span', { class: 'spacer' }),
+            r.state === 'private'
+              ? h(d, 'button', { class: 'b', onclick: () => save(() => p.onState('draft')) }, 'Make draft')
+              : h(d, 'button', { class: 'b', onclick: () => save(() => p.onState('private')) }, 'Make private'),
+            h(d, 'button', { class: 'b', onclick: () => save(() => p.onPublish()) }, 'Publish now'),
+            h(d, 'button', { class: 'b primary', onclick: () => save() }, 'Save'),
+          )
+        : h(
+            d,
+            'div',
+            { class: 'row end' },
+            h(d, 'button', { class: 'b', onclick: () => this.closePopover() }, 'Cancel'),
+            h(d, 'button', { class: 'b primary', onclick: () => save() }, 'Save draft reply'),
+          ),
+      h(d, 'div', { class: 'hint' }, 'Kept as a draft until you submit or publish it.'),
+    );
+    editor.onSubmit(() => save());
+    pop.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Escape') this.closePopover();
+    });
+    this.place(pop, p.anchorRect);
+    this.popover = pop;
+    editor.focus();
+  }
+
+  private badges = new Map<string, HTMLElement>();
+
+  /**
+   * Badges in the page margin next to comments that have reply drafts (or
+   * private notes on them). Called again on every scroll, so elements are reused.
+   */
+  showReplyBadges(items: ReplyBadge[], left: number, onClick: (commentId: string) => void): void {
+    const d = this.doc;
+    const keep = new Set<string>();
+    for (const it of items) {
+      // Not above the sticky header, not off screen.
+      if (it.rect.bottom < 110 || it.rect.top > window.innerHeight) continue;
+      keep.add(it.commentId);
+      let el = this.badges.get(it.commentId);
+      if (!el) {
+        el = h(d, 'button', { class: 'badge', onclick: () => onClick(it.commentId) });
+        this.badges.set(it.commentId, el);
+        this.wrap.append(el);
+      }
+      const n = it.drafts + it.privates;
+      el.className = `badge${it.drafts ? '' : ' private'}`;
+      el.textContent = `✎ ${n}`;
+      el.title = [it.drafts ? `${it.drafts} draft repl${it.drafts === 1 ? 'y' : 'ies'}` : '', it.privates ? `${it.privates} private note${it.privates === 1 ? '' : 's'}` : '']
+        .filter(Boolean)
+        .join(', ') + ' on this comment. Click to open it.';
+      el.style.top = `${Math.round(it.rect.top + (it.rect.height - 20) / 2)}px`;
+      el.style.left = `${Math.round(Math.min(window.innerWidth - 60, left))}px`;
+    }
+    for (const [k, el] of this.badges) {
+      if (keep.has(k)) continue;
+      el.remove();
+      this.badges.delete(k);
+    }
+  }
+
   /** The × in a popover's header. */
   private closeX(): HTMLElement {
     return h(this.doc, 'button', { class: 'x', title: 'Close (Esc)', 'aria-label': 'Close', onclick: () => this.closePopover() }, '×');
@@ -476,6 +618,19 @@ export class Overlay {
     this.wrap.append(this.banner);
   }
 
+  /** Moves the banner left of `rect` (Confluence's comment thread) while they would overlap, so its reply box stays usable. */
+  avoid(rect: DOMRect | null): void {
+    const b = this.banner;
+    if (!b) return;
+    b.style.left = '';
+    b.style.right = '';
+    if (!rect) return;
+    const r = b.getBoundingClientRect();
+    if (r.right <= rect.left || r.left >= rect.right || r.bottom <= rect.top || r.top >= rect.bottom) return;
+    b.style.right = 'auto';
+    b.style.left = `${Math.max(12, rect.left - r.width - 16)}px`;
+  }
+
   closeDialog(): void {
     this.dialog?.remove();
     this.dialog = null;
@@ -503,11 +658,11 @@ export class Overlay {
         d,
         'div',
         { class: 'item' },
-        h(d, 'div', { class: 'top' }, h(d, 'span', { class: 'q' }, `“${truncate(it.note.target.exact, 120)}”`), status),
-        h(d, 'div', { class: 'b-preview body' }, adfToFragment(it.note.body, d)),
+        h(d, 'div', { class: 'top' }, h(d, 'span', { class: 'q' }, it.label), status),
+        h(d, 'div', { class: 'b-preview body' }, adfToFragment(it.body, d)),
         line,
       );
-      rows.set(it.note.id, { status, line, root });
+      rows.set(it.id, { status, line, root });
       content.append(root);
     }
     let summaryEl: HTMLTextAreaElement | null = null;
@@ -584,6 +739,68 @@ export class Overlay {
 
   destroy(): void {
     this.host.remove();
+  }
+}
+
+/**
+ * Our strip inside Confluence's comment thread popup: "Save as draft reply"
+ * and the drafts already written for the thread. It lives in Confluence's DOM
+ * (React keeps extra nodes it did not create), so it has a shadow root of its
+ * own and keeps events from reaching Confluence.
+ */
+export class ThreadStrip {
+  readonly host: HTMLElement;
+  private readonly wrap: HTMLElement;
+
+  constructor(private readonly doc: Document) {
+    this.host = doc.createElement('margin-notes-thread');
+    this.host.style.cssText = 'display: block; margin: 0 16px 12px;';
+    const shadow = this.host.attachShadow({ mode: __E2E__ ? 'open' : 'closed' });
+    const style = doc.createElement('style');
+    style.textContent = CSS_TEXT;
+    this.wrap = h(doc, 'div', { class: 'mn' });
+    shadow.append(style, this.wrap);
+    for (const t of ['mousedown', 'mouseup', 'click', 'keydown', 'keyup', 'keypress', 'focusin', 'focusout']) {
+      this.host.addEventListener(t, (e) => e.stopPropagation());
+    }
+    // Keeps the focus (and the text) in Confluence's reply box while our buttons are clicked.
+    this.host.addEventListener('mousedown', (e) => e.preventDefault());
+  }
+
+  render(p: ThreadStripProps): void {
+    const d = this.doc;
+    const rect = (e: Event) => (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const n = p.drafts.filter((r) => r.state === 'draft').length;
+    const lines = p.drafts.map((r) =>
+      h(
+        d,
+        'div',
+        { class: 'draft-line' },
+        h(d, 'span', { class: `dot ${r.state}`, title: r.state === 'draft' ? 'Draft reply' : 'Private note' }),
+        h(d, 'span', { class: 'txt', title: adfToPlain(r.body) }, adfToPlain(r.body) || '(empty)'),
+        h(d, 'button', { class: 'b small', onclick: (e: Event) => p.onOpen(r, rect(e)) }, 'Edit'),
+        r.state === 'draft' ? h(d, 'button', { class: 'b small', onclick: () => p.onPublish(r) }, 'Publish') : null,
+      ),
+    );
+    this.wrap.replaceChildren(
+      h(
+        d,
+        'div',
+        { class: 'strip' },
+        p.drafts.length
+          ? h(d, 'div', { class: 'hint' }, n ? `${n} draft repl${n === 1 ? 'y' : 'ies'}, not published yet` : 'Private notes on this comment')
+          : null,
+        ...lines,
+        h(
+          d,
+          'div',
+          { class: 'row' },
+          h(d, 'span', { class: 'dot draft' }),
+          h(d, 'span', { class: 'hint spacer' }, 'margin-notes'),
+          h(d, 'button', { class: 'b small', title: 'Keep the reply as a draft and submit it with your other draft comments', onclick: (e: Event) => p.onSaveDraft(rect(e)) }, 'Save as draft reply'),
+        ),
+      ),
+    );
   }
 }
 

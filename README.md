@@ -50,6 +50,16 @@ Firefox does not grant host permissions to Manifest V3 add-ons at install time. 
 - The **sidebar** (toolbar button, or `Alt+Shift+N`, `Ctrl+Shift+N` on a Mac) lists the notes on the current page with filters, shows notes that need attention (text changed, ambiguous, orphaned), lets you re-attach them to a new selection, and has an **All notes** view across pages plus JSON export/import. The page's inline comments (yours and other people's) are under their own **Comments** filter, and **All notes** has a **Comments** tab.
 - **Search** in the sidebar (on the page view and in **All notes**): every word and `"quoted phrase"` must appear in the note or comment, its quote, the page title, the comment's author or a reply. Case and accents are ignored. Filters for notes: `is:private`, `is:draft`, `is:attention`. Filters for comments: `is:comment`, `is:published` (your comments, same as `by:me`), `by:me`, `by:others`, `is:resolved`, `is:open`, `is:deleted`, `is:unread`, `has:replies`. A comment filter searches the comments even while notes are shown, so `solver is:open` finds open comments. For example `solver is:draft` or `rollout by:others`.
 
+### Replying to comments
+
+- **In Confluence's comment thread** (click a highlighted comment), margin-notes adds a strip under the reply box. Type your reply in Confluence's box as usual and click **Save as draft reply** instead of **Reply**: the text becomes a draft and Confluence's box is emptied. With the box empty, the button opens margin-notes' own editor. The strip lists the thread's drafts with **Edit** and **Publish**.
+- Comments with draft replies (or private notes on them) get a **✎ badge** in the right margin, next to the highlighted text, so you see them without opening the thread. Clicking it opens the thread.
+- Every inline comment in the sidebar (yours or someone else's, under **Comments**) also has **Draft reply**. The reply is kept as a draft under the comment's thread until you publish it, nobody is notified before that.
+- Draft replies count towards the **Draft comments** pill and are posted by **Submit** after the page's inline comments (and before the summary). **Publish now** on a draft reply posts just that one.
+- **Make private** keeps a reply as a private note on the comment, never published. **Discard** turns draft replies back into private ones, like notes.
+- Before posting, the comment is read again: a reply to a comment that was deleted in Confluence is not posted and stays as a draft. A reply to a resolved comment is posted (the dialog marks it **Resolved**).
+- Once posted, the reply is read back with the comment's thread and the draft is gone. Replies whose comment is no longer on the page are listed at the end of **Comments**.
+
 ### After publishing
 
 - Once published, a note stops being a note: it becomes a Confluence comment, and from then on margin-notes reads it from Confluence instead of keeping its own copy. It is listed under **Comments**, together with the other inline comments of the pages you open (also ones you wrote in Confluence directly). Until Confluence draws its own highlight (often only after a reload), margin-notes keeps highlighting the text.
@@ -65,7 +75,8 @@ Settings > **Sync between machines** > **Set up sync** keeps your notes on a pag
 - Each note merges by last writer wins on `updatedAt`, except that a deletion always wins over an edit. Writes use the page version, so two machines writing at the same time merge again instead of overwriting each other.
 - A sync page whose content is not margin-notes data is never overwritten; the error shows in Settings.
 - Each sync that changes something adds a page version, so the page history grows over time.
-- Draft comment summaries (the optional page comment) are not synced, only the notes and which comment replies you have read.
+- Draft comment summaries (the optional page comment) are not synced, only the notes, the reply drafts and which comment replies you have read.
+- Versions before reply drafts drop them from the sync page when they write it; a newer machine sends them again on its next sync. Keep all machines on the same version.
 - Published notes are synced as deletions only, so a draft copy on another machine can never come back and be published a second time. Each machine reads the comment itself from Confluence. Machines still on an older version see the published note disappear, and while one of them syncs, read replies may be written back and forth.
 
 ### Deleted notes

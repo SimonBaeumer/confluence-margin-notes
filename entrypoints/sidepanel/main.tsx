@@ -2,8 +2,8 @@ import { render } from 'preact';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ActionResult, PageInfo, Settings, ToContent } from '../../src/core/messages';
 import { SETTINGS_KEY } from '../../src/core/messages';
-import type { AdfDoc, CommentRecord, DraftSession, Note, NoteState } from '../../src/core/model';
-import { commentKey, commentLabel, latestReplyAt, unreadReplies } from '../../src/core/model';
+import type { AdfDoc, CommentRecord, DraftSession, Note, NoteState, ReplyDraft } from '../../src/core/model';
+import { commentKey, commentLabel, latestReplyAt, newReplyDraft, unreadReplies } from '../../src/core/model';
 import { adfToFragment } from '../../src/core/rich-text';
 import { isEmptyQuery, matches, needsAttention, parseQuery, SEARCH_HELP, snippet, type Entry, type EntryKind, type Query } from '../../src/core/search';
 import { NoteStore, type ExportFile } from '../../src/core/store';
@@ -258,9 +258,86 @@ function NoteCard({ note, onPage }: { note: Note; onPage: boolean }) {
   );
 }
 
-/** A comment read from Confluence: yours (published here or not) or someone else's. */
-function CommentCard({ comment: c, seenAt, onPage }: { comment: CommentRecord; seenAt: string | null; onPage: boolean }) {
+function repliesLabel(n: number): string {
+  return `${n} draft repl${n === 1 ? 'y' : 'ies'}`;
+}
+
+/** Groups reply drafts by the comment they reply to ("<site>:<comment id>"). */
+function repliesByComment(replies: ReplyDraft[]): Map<string, ReplyDraft[]> {
+  const m = new Map<string, ReplyDraft[]>();
+  for (const r of [...replies].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+    const k = commentKey(r.page.site, r.commentId);
+    if (!m.has(k)) m.set(k, []);
+    m.get(k)!.push(r);
+  }
+  return m;
+}
+
+async function startReply(c: CommentRecord, body: AdfDoc): Promise<string | null> {
+  await store.startSession(c.page.key);
+  await store.putReply(newReplyDraft(c, body));
+  return null;
+}
+
+/** A reply you are writing to a comment, or a private note on it. */
+function ReplyDraftItem({ reply: r, onPage, orphan = false }: { reply: ReplyDraft; onPage: boolean; orphan?: boolean }) {
   const [editing, setEditing] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const setState = async (state: ReplyDraft['state']) => {
+    if (state === 'draft') await store.startSession(r.page.key);
+    await store.updateReply(r.id, { state, lastError: null });
+  };
+  return (
+    <div class={`reply-draft ${r.state}`}>
+      <div class="row">
+        <span class={`dot ${r.state}`} />
+        <span class="state">{r.state === 'draft' ? 'Your draft reply' : 'Private note on this comment'}</span>
+      </div>
+      {orphan && (
+        <div class="quote-line muted">
+          Reply to {r.authorName ?? 'a comment'}: “{r.quote.slice(0, 120)}”
+        </div>
+      )}
+      {editing ? (
+        <InlineEditor body={r.body} onDone={() => setEditing(false)} onSave={async (body) => (await store.updateReply(r.id, { body }), null)} />
+      ) : (
+        <Body doc={r.body} />
+      )}
+      {r.lastError && <div class="hint err">{r.lastError}</div>}
+      {msg && <div class="hint err">{msg}</div>}
+      {!editing && (
+        <div class="actions">
+          <button class="b small" onClick={() => setEditing(true)}>
+            Edit
+          </button>
+          {r.state === 'private' ? (
+            <button class="b small" title="Submit it with the other draft comments of this page" onClick={() => void setState('draft')}>
+              Make draft
+            </button>
+          ) : (
+            <button class="b small" onClick={() => void setState('private')}>
+              Make private
+            </button>
+          )}
+          {onPage && !orphan && (
+            <button class="b small" title="Post the reply right away" onClick={async () => setMsg(await act({ type: 'publish-reply', replyId: r.id }, r.page.site))}>
+              Publish now
+            </button>
+          )}
+          <span class="spacer" />
+          <button class="b small danger" onClick={() => confirm('Delete this reply draft?') && void store.deleteReply(r.id)}>
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A comment read from Confluence: yours (published here or not) or someone else's. */
+function CommentCard({ comment: c, seenAt, onPage, drafts = [] }: { comment: CommentRecord; seenAt: string | null; onPage: boolean; drafts?: ReplyDraft[] }) {
+  const [editing, setEditing] = useState(false);
+  const [replying, setReplying] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const unread = new Set(unreadReplies(c, seenAt).map((r) => r.id));
   const url = c.webUrl ? new URL(c.webUrl, `https://${c.page.site}`).href : null;
@@ -314,8 +391,20 @@ function CommentCard({ comment: c, seenAt, onPage }: { comment: CommentRecord; s
           ))}
         </div>
       )}
+      {drafts.map((r) => (
+        <ReplyDraftItem key={r.id} reply={r} onPage={onPage} />
+      ))}
+      {replying && (
+        <InlineEditor
+          body={{ type: 'doc', version: 1, content: [] }}
+          onDone={() => setReplying(false)}
+          onSave={(body) => startReply(c, body)}
+          saveLabel="Save draft reply"
+          hint="Kept as a draft until you submit or publish it."
+        />
+      )}
       {msg && <div class="hint err">{msg}</div>}
-      {!editing && (
+      {!editing && !replying && (
         <div class="actions">
           {onPage && !deleted ? (
             <button class="b" title="Scroll to the comment and open it" onClick={() => void jump()}>
@@ -332,6 +421,11 @@ function CommentCard({ comment: c, seenAt, onPage }: { comment: CommentRecord; s
           {unread.size > 0 && (
             <button class="b" onClick={() => markRead(c)}>
               Mark read
+            </button>
+          )}
+          {!deleted && (
+            <button class="b" title="Write a reply and submit it with your other draft comments" onClick={() => setReplying(true)}>
+              Draft reply
             </button>
           )}
           {c.mine && !deleted && (
@@ -407,7 +501,21 @@ function SearchBox({ value, onInput, placeholder, query }: { value: string; onIn
   );
 }
 
-function PageView({ info, notes, comments, seen, sessions }: { info: PageInfo | null; notes: Note[]; comments: CommentRecord[]; seen: Record<string, string>; sessions: DraftSession[] }) {
+function PageView({
+  info,
+  notes,
+  comments,
+  replies,
+  seen,
+  sessions,
+}: {
+  info: PageInfo | null;
+  notes: Note[];
+  comments: CommentRecord[];
+  replies: ReplyDraft[];
+  seen: Record<string, string>;
+  sessions: DraftSession[];
+}) {
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
   const query = useMemo(() => parseQuery(q), [q]);
@@ -424,7 +532,10 @@ function PageView({ info, notes, comments, seen, sessions }: { info: PageInfo | 
   const shownComments = kind === 'comment' ? here.filter((e) => matches(e, query)) : [];
   const shown = shownNotes.length + shownComments.length;
   const session = sessions.find((s) => s.pageKey === page.key) ?? null;
-  const drafts = count('draft');
+  const replyGroups = repliesByComment(replies.filter((r) => r.page.key === page.key));
+  // Replies whose comment is gone from the page (or not read yet) still need a place.
+  const orphans = [...replyGroups.entries()].filter(([k]) => !here.some((e) => commentKey(e.comment.page.site, e.comment.id) === k)).flatMap(([, g]) => g);
+  const drafts = count('draft') + [...replyGroups.values()].flat().filter((r) => r.state === 'draft').length;
   const empty =
     kind === 'comment'
       ? here.length
@@ -452,8 +563,16 @@ function PageView({ info, notes, comments, seen, sessions }: { info: PageInfo | 
         <NoteCard key={n.id} note={n} onPage />
       ))}
       {shownComments.map((e) => (
-        <CommentCard key={e.comment.id} comment={e.comment} seenAt={e.seenAt} onPage />
+        <CommentCard key={e.comment.id} comment={e.comment} seenAt={e.seenAt} onPage drafts={replyGroups.get(commentKey(e.comment.page.site, e.comment.id))} />
       ))}
+      {kind === 'comment' && isEmptyQuery(query) && orphans.length > 0 && (
+        <article class="note comment others">
+          <div class="hint warn">These replies are on comments that are no longer on this page.</div>
+          {orphans.map((r) => (
+            <ReplyDraftItem key={r.id} reply={r} onPage orphan />
+          ))}
+        </article>
+      )}
     </>
   );
 }
@@ -477,7 +596,20 @@ function groupByPage<T>(items: T[], pageOf: (x: T) => Note['page'], time: (x: T)
   return [...m.values()].sort((a, b) => latest(b) - latest(a));
 }
 
-function AllView({ notes, comments, seen, currentKey }: { notes: Note[]; comments: CommentRecord[]; seen: Record<string, string>; currentKey: string | null }) {
+function AllView({
+  notes,
+  comments,
+  replies,
+  seen,
+  currentKey,
+}: {
+  notes: Note[];
+  comments: CommentRecord[];
+  replies: ReplyDraft[];
+  seen: Record<string, string>;
+  currentKey: string | null;
+}) {
+  const replyGroups = useMemo(() => repliesByComment(replies), [replies]);
   const [tab, setTab] = useState<EntryKind>('note');
   const [q, setQ] = useState('');
   const query = useMemo(() => parseQuery(q), [q]);
@@ -557,6 +689,7 @@ function AllView({ notes, comments, seen, currentKey }: { notes: Note[]; comment
               {g.sort(byCreated).map((e) => {
                 const c = e.comment;
                 const unread = unreadReplies(c, e.seenAt).length;
+                const drafted = replyGroups.get(commentKey(c.page.site, c.id))?.length ?? 0;
                 const url = c.webUrl ? new URL(c.webUrl, `https://${c.page.site}`).href : p.url;
                 return (
                   <li
@@ -576,6 +709,7 @@ function AllView({ notes, comments, seen, currentKey }: { notes: Note[]; comment
                       {c.resolution === 'resolved' && <span class="chip ok">resolved</span>}
                       {c.resolution === 'deleted' && <span class="chip warn">deleted</span>}
                       {unread > 0 && <span class="chip new">{unread} new</span>}
+                      {drafted > 0 && <span class="chip draft">{repliesLabel(drafted)}</span>}
                     </div>
                     {searching && <Snippet entry={e} query={query} />}
                   </li>
@@ -738,6 +872,7 @@ function App() {
   const [comments, setComments] = useState<CommentRecord[]>([]);
   const [seen, setSeen] = useState<Record<string, string>>({});
   const [sessions, setSessions] = useState<DraftSession[]>([]);
+  const [replies, setReplies] = useState<ReplyDraft[]>([]);
   const [info] = usePageInfo(tick);
   const unread = comments.filter((c) => unreadReplies(c, seen[commentKey(c.page.site, c.id)] ?? null).length > 0).length;
   useEffect(() => {
@@ -746,6 +881,7 @@ function App() {
     void store.allComments().then(setComments);
     void store.seen().then(setSeen);
     void store.allSessions().then(setSessions);
+    void store.allReplies().then(setReplies);
   }, [tick]);
   return (
     <div class="mn">
@@ -758,8 +894,8 @@ function App() {
         ))}
       </nav>
       <main>
-        {view === 'page' && <PageView info={info} notes={notes} comments={comments} seen={seen} sessions={sessions} />}
-        {view === 'all' && <AllView notes={notes} comments={comments} seen={seen} currentKey={info?.page?.key ?? null} />}
+        {view === 'page' && <PageView info={info} notes={notes} comments={comments} replies={replies} seen={seen} sessions={sessions} />}
+        {view === 'all' && <AllView notes={notes} comments={comments} replies={replies} seen={seen} currentKey={info?.page?.key ?? null} />}
         {view === 'settings' && <SettingsView tick={tick} info={info} />}
       </main>
     </div>

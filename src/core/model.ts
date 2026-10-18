@@ -137,6 +137,51 @@ export interface Note {
   deleted: boolean;
 }
 
+/**
+ * A reply you are writing to an inline comment (yours or someone else's).
+ * Synced like a note. Once published it becomes a tombstone (deleted, with
+ * `publishedId` set) and the reply is read from Confluence with its comment.
+ */
+export interface ReplyDraft {
+  schemaVersion: number;
+  id: string;
+  /** The page of the comment. */
+  page: PageRef;
+  /** The Confluence id of the comment it replies to. */
+  commentId: string;
+  /** The comment's quote and author when the reply was started, for lists that do not have the comment. */
+  quote: string;
+  authorName: string | null;
+  /** "private" is a note to yourself about the comment, never published. */
+  state: 'private' | 'draft';
+  body: AdfDoc;
+  lastError: string | null;
+  /** The id of the reply in Confluence, once published. */
+  publishedId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deleted: boolean;
+}
+
+/** A new reply draft to a comment. */
+export function newReplyDraft(c: Pick<CommentRecord, 'id' | 'page' | 'quote' | 'mine' | 'authorName'>, body: AdfDoc, state: ReplyDraft['state'] = 'draft'): ReplyDraft {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    id: crypto.randomUUID(),
+    page: c.page,
+    commentId: c.id,
+    quote: c.quote,
+    authorName: c.mine ? null : c.authorName,
+    state,
+    body,
+    lastError: null,
+    publishedId: null,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+    deleted: false,
+  };
+}
+
 /** A per-page "draft comments" session (the GitHub-style review). */
 export interface DraftSession {
   pageKey: string;

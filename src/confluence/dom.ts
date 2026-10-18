@@ -31,6 +31,52 @@ export function findCommentMark(root: HTMLElement, markerRef: string): HTMLEleme
   return root.querySelector<HTMLElement>(`mark[data-mark-type="annotation"][data-id="${CSS.escape(markerRef)}"]`);
 }
 
+/** Confluence's open inline comment thread (the popup next to the page text). */
+export interface CommentThreadUi {
+  root: HTMLElement;
+  /** The top-level comment of the thread. */
+  commentId: string;
+  /** Where the replies and the reply box are; our strip goes at its end. */
+  wrapper: HTMLElement;
+  /** Confluence's reply editor, while it is open. */
+  editor: HTMLElement | null;
+  cancel: HTMLElement | null;
+}
+
+export function findCommentThread(doc: Document): CommentThreadUi | null {
+  const root = doc.querySelector<HTMLElement>('[data-testid="renderer-comments-sidebar"]');
+  if (!root) return null;
+  // The first comment in the thread is the top-level one, the replies follow it.
+  const commentId = root.querySelector<HTMLElement>('[data-testid="inline-comment-container"] [data-comment-id]')?.dataset.commentId;
+  const wrapper = root.querySelector<HTMLElement>('[data-testid="inline-comment-sidebar-wrapper"]');
+  if (!commentId || !wrapper) return null;
+  const box = root.querySelector<HTMLElement>('[data-testid="inline-comment-new-reply-container"]');
+  return {
+    root,
+    commentId,
+    wrapper,
+    editor: box?.querySelector<HTMLElement>('[contenteditable="true"]') ?? null,
+    cancel: box?.querySelector<HTMLElement>('[data-testid="editor-cancel-inline-comment-action"]') ?? null,
+  };
+}
+
+/**
+ * Confirms Confluence's "Do you want to discard this comment?" question, which
+ * cancelling a reply with text asks. Waits for it up to `ms`; resolves whether it was answered.
+ */
+export async function confirmDiscardComment(doc: Document, ms = 2000): Promise<boolean> {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    const ok = doc.querySelector<HTMLElement>('[data-testid="modal-dialog-comment-warning"] [data-testid="comment-warning-ok-button"]');
+    if (ok) {
+      ok.click();
+      return true;
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return false;
+}
+
 export interface PageMeta {
   host: string;
   pageId: string;

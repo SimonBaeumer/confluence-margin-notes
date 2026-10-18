@@ -1,4 +1,4 @@
-import { SCHEMA_VERSION, type Note } from '../src/core/model';
+import { SCHEMA_VERSION, type Note, type ReplyDraft } from '../src/core/model';
 import { plainToAdf } from '../src/core/rich-text';
 import { fingerprint, MemoryArea, NoteStore } from '../src/core/store';
 import { ConfluenceClient } from '../src/confluence/client';
@@ -335,5 +335,56 @@ describe('NoteStore.applyRemote', () => {
     const n = await store.applyRemote([note('a', ago(10))], [], new Map([['a', fingerprint(read)]]));
     expect(n).toBe(0);
     expect((await store.get('a'))!.body).toEqual(plainToAdf('edited meanwhile'));
+  });
+});
+
+function reply(id: string, updatedAt: string, extra: Partial<ReplyDraft> = {}): ReplyDraft {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    id,
+    page: { key: 'confluence:x:1', site: 'x', pageId: '1', url: 'https://x/wiki/1', title: 'T' },
+    commentId: 'c1',
+    quote: 'a',
+    authorName: null,
+    state: 'draft',
+    body: plainToAdf(`reply ${id}`),
+    lastError: null,
+    publishedId: null,
+    createdAt: updatedAt,
+    updatedAt,
+    deleted: false,
+    ...extra,
+  };
+}
+
+describe('merge of reply drafts', () => {
+  it('takes replies from both sides and lets a deletion win', () => {
+    const remote = { ...doc([]), replies: [reply('r1', ago(DAY)), reply('r2', ago(DAY))] };
+    const published = reply('r2', ago(DAY + 1000), { deleted: true, publishedId: '9' });
+    const m = merge([], remote, NOW, {}, [reply('r3', ago(1000)), published]);
+    expect(m.doc.replies!.map((r) => [r.id, r.deleted])).toEqual([
+      ['r1', false],
+      ['r2', true],
+      ['r3', false],
+    ]);
+    expect(m.replyWrites.map((r) => r.id)).toEqual(['r1']);
+    expect(m.remoteChanged).toBe(true);
+    expect(merge([], m.doc, NOW, {}, m.doc.replies).remoteChanged).toBe(false);
+  });
+
+  it('reads sync pages written before replies existed', () => {
+    const { replies: _r, ...old } = emptySyncDoc(ago(DAY));
+    const parsed = parseSyncPage(renderSyncPage(old as SyncDoc), ago(0));
+    expect(parsed.replies).toEqual([]);
+    const m = merge([], parsed, NOW, {}, [reply('r1', ago(10))]);
+    expect(m.remoteChanged).toBe(true);
+    expect(m.doc.replies!.map((r) => r.id)).toEqual(['r1']);
+  });
+
+  it('purges old reply tombstones like notes', () => {
+    const m = merge([], doc([]), NOW, {}, [reply('r1', ago(40 * DAY), { deleted: true })]);
+    expect(m.doc.replies).toEqual([]);
+    expect(m.doc.purged.r1).toBe(ago(40 * DAY));
+    expect(m.replyRemoves).toEqual(['r1']);
   });
 });

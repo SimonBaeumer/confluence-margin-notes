@@ -155,6 +155,21 @@ export class ConfluenceClient {
     };
   }
 
+  /** Replies to an inline comment. Replies have no inline properties of their own. */
+  async createInlineReply(parentCommentId: string, body: AdfDoc): Promise<CreatedComment> {
+    const res = await this.request('/wiki/api/v2/inline-comments', {
+      method: 'POST',
+      body: JSON.stringify({ parentCommentId, body: { representation: 'atlas_doc_format', value: JSON.stringify(body) } }),
+    });
+    const j = await res.json();
+    return {
+      id: String(j.id),
+      inlineMarkerRef: null,
+      inlineOriginalSelection: null,
+      webUrl: j._links?.webui ? (j._links.base ?? '/wiki') + j._links.webui : null,
+    };
+  }
+
   async createFooterComment(pageId: string, body: AdfDoc): Promise<CreatedComment> {
     const res = await this.request('/wiki/api/v2/footer-comments', {
       method: 'POST',

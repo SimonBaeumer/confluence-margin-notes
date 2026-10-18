@@ -5,16 +5,16 @@ import { buildIndex, computeMatch, type PageTextIndex } from '../core/adf-text';
 import { anchor, describe, rebase, targetForQuote, type AnchorResult } from '../core/anchoring';
 import { pageKeyFor, SETTINGS_KEY, type ActionResult, type PageInfo, type Settings, type ToContent } from '../core/messages';
 import { isGraduated } from '../core/graduate';
-import { SCHEMA_VERSION, commentKey, latestReplyAt, nowIso, type AdfDoc, type CommentRecord, type Note, type PageRef } from '../core/model';
-import { plainToAdf } from '../core/rich-text';
-import { isCommentKey, isNoteKey, isSeenKey, isSessionKey, NoteStore } from '../core/store';
+import { SCHEMA_VERSION, commentKey, latestReplyAt, newReplyDraft, nowIso, type AdfDoc, type CommentRecord, type Note, type PageRef, type ReplyDraft } from '../core/model';
+import { domToAdf, isEmptyDoc, plainToAdf } from '../core/rich-text';
+import { isCommentKey, isNoteKey, isReplyKey, isSeenKey, isSessionKey, NoteStore } from '../core/store';
 import { ConfluenceClient } from '../confluence/client';
-import { DomMapper, findCommentMark, findRoot, readPageMeta, type PageMeta } from '../confluence/dom';
+import { confirmDiscardComment, DomMapper, findCommentMark, findCommentThread, findRoot, readPageMeta, type PageMeta } from '../confluence/dom';
 import { deleteComment, editComment, readComment, readPageComments } from '../confluence/comments';
-import { gateFor, indexForVersion, publishNote, submitDrafts, type PublishHooks } from '../confluence/publish';
+import { gateFor, indexForVersion, publishNote, publishReply, submitDrafts, type PublishHooks } from '../confluence/publish';
 import { readSyncConfig, SYNC_CONFIG_KEY, SyncService } from '../sync/service';
 import { Highlighter, type Painted } from './highlights';
-import { Overlay, type DialogItem, type SubmitDialog } from './overlay';
+import { Overlay, ThreadStrip, type DialogItem, type ReplyBadge, type SubmitDialog } from './overlay';
 
 const POLL_MS = 700;
 const MUTATION_DEBOUNCE_MS = 350;
@@ -81,6 +81,8 @@ export class App {
   private published: Note[] = [];
   /** Cached comments on this page. */
   private comments: CommentRecord[] = [];
+  /** Your reply drafts (and private notes) on this page's comments. */
+  private replies: ReplyDraft[] = [];
   private results = new Map<string, AnchorResult>();
   private loading: Promise<void> | null = null;
   private lastKey = '';
@@ -95,6 +97,9 @@ export class App {
   /** When a page's comments (by page key) or one comment (by comment key) were last read. */
   private commentsCheckedAt = new Map<string, number>();
   private me: Promise<string> | null = null;
+  /** Our strip in Confluence's open comment thread, and the comment it is for. */
+  private strip: { ui: ThreadStrip; commentId: string } | null = null;
+  private frame = 0;
 
   start(): void {
     setInterval(() => this.tick(), POLL_MS);
@@ -102,8 +107,8 @@ export class App {
     browser.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local') return;
       const keys = Object.keys(changes);
-      if (keys.some((k) => isNoteKey(k) || isSessionKey(k) || isCommentKey(k))) void this.refreshNotes();
-      if (keys.some((k) => isNoteKey(k) || isSeenKey(k))) this.scheduleSync(SYNC_DEBOUNCE_MS);
+      if (keys.some((k) => isNoteKey(k) || isReplyKey(k) || isSessionKey(k) || isCommentKey(k))) void this.refreshNotes();
+      if (keys.some((k) => isNoteKey(k) || isReplyKey(k) || isSeenKey(k))) this.scheduleSync(SYNC_DEBOUNCE_MS);
       if (keys.includes(SYNC_CONFIG_KEY)) void this.initSync();
     });
     // Published notes from older versions become comments.
@@ -121,7 +126,21 @@ export class App {
       const sel = document.getSelection();
       if (!sel || sel.isCollapsed) this.overlay.hideAddButton();
     });
-    window.addEventListener('scroll', () => this.overlay.hideAddButton(), { passive: true });
+    window.addEventListener('scroll', () => (this.overlay.hideAddButton(), this.schedule()), { passive: true, capture: true });
+    window.addEventListener('resize', () => this.schedule());
+    // Confluence opens and re-renders its comment thread popup at any time.
+    new MutationObserver(() => this.schedule()).observe(document.body, { childList: true, subtree: true });
+  }
+
+  /** Updates the thread strip and the reply badges once per frame. */
+  private schedule(): void {
+    if (this.frame) return;
+    this.frame = requestAnimationFrame(() => {
+      this.frame = 0;
+      this.decorateThread();
+      this.updateBadges();
+      this.overlay.avoid(findCommentThread(document)?.root.getBoundingClientRect() ?? null);
+    });
   }
 
   // ---- page lifecycle -------------------------------------------------------
@@ -162,11 +181,13 @@ export class App {
     this.notes = [];
     this.published = [];
     this.comments = [];
+    this.replies = [];
     this.results.clear();
     this.highlighter.clear();
     this.overlay.closePopover();
     this.overlay.hideAddButton();
     this.overlay.showBanner(0, () => {}, () => {});
+    this.overlay.showReplyBadges([], 0, () => {});
     this.unavailable = null;
     void browser.runtime.sendMessage({ type: 'badge', count: 0 }).catch(() => {});
   }
@@ -230,9 +251,11 @@ export class App {
     const stale = () => this.index !== index;
     const all = (await this.store.allNotes(true)).filter((n) => n.page.key === pageKey);
     const comments = await this.store.commentsForPage(pageKey);
+    const replies = await this.store.repliesForPage(pageKey);
     if (stale()) return;
     this.notes = all.filter((n) => !n.deleted && n.state !== 'published');
     this.comments = comments;
+    this.replies = replies;
     const live = new Set(comments.filter((c) => c.resolution !== 'deleted').map((c) => c.id));
     this.published = all.filter((n) => isGraduated(n) && live.has(n.published!.commentId));
     for (const n of this.published) {
@@ -245,6 +268,8 @@ export class App {
     }
     this.paint();
     this.updateBanner();
+    this.renderStrip();
+    this.updateBadges();
   }
 
   /** Re-anchors a note and saves it when its target or status changed. */
@@ -302,9 +327,14 @@ export class App {
     return this.notes.filter((n) => n.state === 'draft');
   }
 
+  private replyDrafts(): ReplyDraft[] {
+    return this.replies.filter((r) => r.state === 'draft').sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
   private updateBanner(): void {
-    const count = this.drafts().length;
+    const count = this.drafts().length + this.replyDrafts().length;
     this.overlay.showBanner(count, () => void this.openSubmit(), () => void this.discard());
+    this.schedule();
     void browser.runtime.sendMessage({ type: 'badge', count }).catch(() => {});
   }
 
@@ -537,6 +567,100 @@ export class App {
     return null;
   }
 
+  // ---- replies in Confluence's comment thread ----------------------------------
+
+  private decorateThread(): void {
+    const t = this.pageRef ? findCommentThread(document) : null;
+    if (!t) {
+      this.strip = null;
+      return;
+    }
+    if (this.strip?.commentId === t.commentId && t.wrapper.contains(this.strip.ui.host)) return;
+    this.strip?.ui.host.remove();
+    this.strip = { ui: new ThreadStrip(document), commentId: t.commentId };
+    t.wrapper.append(this.strip.ui.host);
+    this.renderStrip();
+  }
+
+  private repliesTo(commentId: string): ReplyDraft[] {
+    return this.replies.filter((r) => r.commentId === commentId).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  private renderStrip(): void {
+    if (!this.strip) return;
+    this.strip.ui.render({
+      drafts: this.repliesTo(this.strip.commentId),
+      onSaveDraft: (anchor) => void this.saveThreadDraft(anchor),
+      onOpen: (r, anchor) => this.openReply(r, anchor),
+      onPublish: (r) => void this.publishReplyOne(r.id),
+    });
+  }
+
+  /** The comment a reply goes to, from the cache or, before it is read, from the thread popup. */
+  private commentFor(commentId: string, root: HTMLElement | null): Pick<CommentRecord, 'id' | 'page' | 'quote' | 'mine' | 'authorName'> {
+    const c = this.comments.find((x) => x.id === commentId);
+    if (c) return c;
+    const author = root?.getAttribute('aria-label')?.match(/^Inline comment by (.+)$/)?.[1] ?? null;
+    const mark = document.querySelector<HTMLElement>('mark[data-mark-annotation-type="inlineComment"][aria-expanded="true"]');
+    return { id: commentId, page: this.pageRef!, quote: mark?.textContent?.trim() ?? '', mine: false, authorName: author };
+  }
+
+  /** Saves what is typed in Confluence's reply box as a draft, or opens our editor when it is empty. */
+  private async saveThreadDraft(anchor: DOMRect): Promise<void> {
+    const t = findCommentThread(document);
+    if (!t || !this.pageRef) return;
+    const c = this.commentFor(t.commentId, t.root);
+    const typed = t.editor ? domToAdf(t.editor) : null;
+    if (!typed || isEmptyDoc(typed)) return this.openReply(null, anchor, c);
+    await this.store.startSession(c.page.key);
+    await this.store.putReply(newReplyDraft(c, typed));
+    // Empties and closes Confluence's reply box: the text lives on as the draft, so its
+    // "discard this comment?" question is answered for you.
+    if (t.cancel) {
+      t.cancel.click();
+      await confirmDiscardComment(document);
+    }
+  }
+
+  private openReply(r: ReplyDraft | null, anchor: DOMRect, comment?: Pick<CommentRecord, 'id' | 'page' | 'quote' | 'mine' | 'authorName'>): void {
+    const c = comment ?? this.commentFor(r!.commentId, null);
+    let saving: Promise<unknown> = Promise.resolve();
+    this.overlay.showReply({
+      reply: r,
+      to: c.mine ? 'your comment' : (c.authorName ?? r?.authorName ?? 'the comment'),
+      quote: c.quote || r?.quote || '',
+      anchorRect: anchor,
+      onSave: (body) => {
+        if (r) saving = this.store.updateReply(r.id, { body });
+        else saving = this.store.startSession(c.page.key).then(() => this.store.putReply(newReplyDraft(c, body)));
+      },
+      onState: (state) =>
+        void saving.then(async () => {
+          if (state === 'draft') await this.store.startSession(c.page.key);
+          await this.store.updateReply(r!.id, { state, lastError: null });
+        }),
+      onPublish: () => void saving.then(() => this.publishReplyOne(r!.id)),
+      onDelete: () => void this.store.deleteReply(r!.id),
+    });
+  }
+
+  /** Badges in the margin next to comments with reply drafts, so they show without opening the thread. */
+  private updateBadges(): void {
+    const root = findRoot();
+    const items: ReplyBadge[] = [];
+    if (root && this.pageRef) {
+      for (const id of new Set(this.replies.map((r) => r.commentId))) {
+        const mark = this.commentMark(id);
+        const rect = mark?.getClientRects()[0];
+        if (!rect) continue;
+        const rs = this.repliesTo(id);
+        items.push({ commentId: id, rect, drafts: rs.filter((r) => r.state === 'draft').length, privates: rs.filter((r) => r.state === 'private').length });
+      }
+    }
+    const left = root ? root.getBoundingClientRect().right + 12 : 0;
+    this.overlay.showReplyBadges(items, left, (id) => void this.jumpTo(id, true));
+  }
+
   // ---- sync -------------------------------------------------------------------
 
   /** Sync runs only in tabs of the site the sync page is on. */
@@ -725,12 +849,22 @@ export class App {
       r = anchor(n.target, this.index, this.indexVersion);
       this.results.set(n.id, r);
     }
-    if (!n.publishable) return { note: n, status: 'Cannot publish', tone: 'err', blockedReason: n.unpublishableReason };
-    if (!r) return { note: n, status: 'Unchecked', tone: 'warn', blockedReason: null };
+    const item = { id: n.id, label: `“${n.target.exact.slice(0, 120)}”`, body: n.body };
+    if (!n.publishable) return { ...item, status: 'Cannot publish', tone: 'err', blockedReason: n.unpublishableReason };
+    if (!r) return { ...item, status: 'Unchecked', tone: 'warn', blockedReason: null };
     const g = gateFor(n, r);
-    if (g.gate === 'blocked') return { note: n, status: r.status, tone: 'err', blockedReason: g.reason };
-    if (g.gate === 'confirm') return { note: n, status: 'Text changed', tone: 'warn', blockedReason: null };
-    return { note: n, status: r.status, tone: 'ok', blockedReason: null };
+    if (g.gate === 'blocked') return { ...item, status: r.status, tone: 'err', blockedReason: g.reason };
+    if (g.gate === 'confirm') return { ...item, status: 'Text changed', tone: 'warn', blockedReason: null };
+    return { ...item, status: r.status, tone: 'ok', blockedReason: null };
+  }
+
+  private replyItem(r: ReplyDraft): DialogItem {
+    const c = this.comments.find((x) => x.id === r.commentId);
+    const who = c ? (c.mine ? 'your comment' : (c.authorName ?? 'a comment')) : (r.authorName ?? 'a comment');
+    const item = { id: r.id, label: `Reply to ${who}: “${(c?.quote ?? r.quote).slice(0, 80)}”`, body: r.body };
+    if (c?.resolution === 'deleted') return { ...item, status: 'Deleted', tone: 'err', blockedReason: 'The comment no longer exists in Confluence.' };
+    if (c?.resolution === 'resolved') return { ...item, status: 'Resolved', tone: 'warn', blockedReason: null };
+    return { ...item, status: 'Reply', tone: 'ok', blockedReason: null };
   }
 
   private hooks(dialog: SubmitDialog): PublishHooks {
@@ -745,7 +879,17 @@ export class App {
       save: async (note) => {
         await this.store.put(note);
       },
+      saveReply: async (reply) => {
+        await this.store.putReply(reply);
+        // Read the thread again so the reply shows up in it.
+        if (reply.publishedId) await this.refreshComment(reply.page.site, reply.commentId);
+      },
     };
+  }
+
+  private async refreshComment(site: string, id: string): Promise<void> {
+    const c = await this.store.getComment(site, id);
+    if (c) await this.refreshMyComments([c], true);
   }
 
   async openSubmit(): Promise<void> {
@@ -753,10 +897,12 @@ export class App {
     await this.loading;
     const page = this.pageRef;
     const drafts = [...this.drafts()].sort((a, b) => (this.results.get(a.id)?.start ?? a.target.start) - (this.results.get(b.id)?.start ?? b.target.start));
+    const replies = this.replyDrafts();
     const session = await this.store.session(page.key);
+    const total = drafts.length + replies.length;
     const dialog = this.overlay.showSubmitDialog({
-      title: `Submit draft comments (${drafts.length})`,
-      items: drafts.map((n) => this.dialogItem(n)),
+      title: `Submit draft comments (${total})`,
+      items: [...drafts.map((n) => this.dialogItem(n)), ...replies.map((r) => this.replyItem(r))],
       summary: session?.summary ?? '',
       onSummaryChange: (s) => void this.store.setSummary(page.key, s),
       onSubmit: async () => {
@@ -771,11 +917,12 @@ export class App {
             drafts.filter((n) => n.publishable),
             summaryText ? plainToAdf(summaryText) : null,
             this.hooks(dialog),
+            replies.filter((r) => !this.replyItem(r).blockedReason),
           );
           const ok = res.outcomes.filter((o) => o.ok).length;
           const failed = res.outcomes.filter((o) => !o.ok);
           for (const f of failed) dialog.addRetry(f.noteId, () => void this.retry(f.noteId, dialog));
-          let text = `${ok} of ${drafts.length} published.`;
+          let text = `${ok} of ${total} published.`;
           if (res.summary?.ok) text += ' Summary posted.';
           if (res.summary && !res.summary.ok) text += ` Summary failed: ${res.summary.error}`;
           if (failed.length) text += ' The rest stay as drafts.';
@@ -790,6 +937,11 @@ export class App {
   }
 
   private async retry(noteId: string, dialog: SubmitDialog): Promise<void> {
+    const r = await this.store.getReply(noteId);
+    if (r) {
+      if (!r.deleted) await publishReply(this.client, r, this.hooks(dialog));
+      return;
+    }
     const n = await this.store.get(noteId);
     if (!n || n.deleted || n.state === 'published') return;
     await publishNote(this.client, n, this.hooks(dialog));
@@ -816,6 +968,30 @@ export class App {
     });
   }
 
+  async publishReplyOne(replyId: string): Promise<string | null> {
+    await this.loading;
+    const r = await this.store.getReply(replyId);
+    if (!r || r.deleted || this.publishing) return null;
+    if (r.page.site !== location.host) return `Open a page on ${r.page.site} to publish this reply.`;
+    const item = this.replyItem(r);
+    const dialog = this.overlay.showSubmitDialog({
+      title: 'Publish reply',
+      items: [item],
+      summary: null,
+      onSubmit: async () => {
+        this.publishing = true;
+        dialog.running();
+        try {
+          const o = await publishReply(this.client, r, this.hooks(dialog));
+          dialog.done(o.ok ? 'Published.' : 'Not published. The reply keeps its previous state.');
+        } finally {
+          this.publishing = false;
+        }
+      },
+    });
+    return null;
+  }
+
   /** State dump for e2e tests. */
   debug(): unknown {
     const sel = document.getSelection();
@@ -831,6 +1007,7 @@ export class App {
       selection: range ? { text: range.toString(), offsets: this.mapper?.rangeToOffsets(range) ?? null } : null,
       notes: this.notes.map((n) => ({ id: n.id, state: n.state, exact: n.target.exact, result: this.results.get(n.id) })),
       comments: this.comments.map((c) => ({ id: c.id, mine: c.mine, resolution: c.resolution, quote: c.quote })),
+      replies: this.replies.map((r) => ({ id: r.id, commentId: r.commentId, state: r.state })),
     };
   }
 
@@ -867,6 +1044,8 @@ export class App {
       case 'publish-now':
         await this.publishOne(msg.noteId);
         return true;
+      case 'publish-reply':
+        return { error: await this.publishReplyOne(msg.replyId) } satisfies ActionResult;
       case 'reattach':
         return { error: await this.reattach(msg.noteId) };
       case 'edit-comment':

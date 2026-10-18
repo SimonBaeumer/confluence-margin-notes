@@ -13,6 +13,8 @@ export type ToContent =
   | { type: 'jump-to-comment'; commentId: string }
   | { type: 'open-submit' }
   | { type: 'publish-now'; noteId: string }
+  /** Opens the publish dialog for a reply draft on this site. */
+  | { type: 'publish-reply'; replyId: string }
   | { type: 'reattach'; noteId: string }
   /** Replaces the text of your comment in Confluence. Answers { error }. */
   | { type: 'edit-comment'; site: string; commentId: string; body: AdfDoc }

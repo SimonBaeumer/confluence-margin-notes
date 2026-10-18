@@ -11,11 +11,14 @@
 // purged id; purged ids are forgotten after PURGED_TTL_MS. A machine that has
 // not synced for longer than that can bring deleted notes back.
 //
+// Reply drafts merge by the same rules, in their own list. Their ids share
+// the purged map with the notes (both are UUIDs).
+//
 // Published notes are tombstones too (see core/graduate.ts): their comments
 // are read from Confluence on every machine and are not synced. Only the seen
 // map is, merged per comment by the later time.
 
-import { SCHEMA_VERSION, type Note } from '../core/model';
+import { SCHEMA_VERSION, type Note, type ReplyDraft } from '../core/model';
 
 export const TOMBSTONE_TTL_MS = 30 * 24 * 3600 * 1000;
 export const PURGED_TTL_MS = 365 * 24 * 3600 * 1000;
@@ -25,7 +28,9 @@ export interface SyncDoc {
   schemaVersion: number;
   updatedAt: string;
   notes: Note[];
-  /** Ids of notes whose deletion is final, with the time they were deleted. */
+  /** Absent on pages written by older versions. */
+  replies?: ReplyDraft[];
+  /** Ids of notes and reply drafts whose deletion is final, with the time they were deleted. */
   purged: Record<string, string>;
   /** Per comment ("<site>:<comment id>"), replies up to this time count as read. */
   seen: Record<string, string>;
@@ -36,6 +41,10 @@ export interface MergeResult {
   localWrites: Note[];
   /** Note ids to remove locally. */
   localRemoves: string[];
+  /** Reply drafts to write locally, as they are. */
+  replyWrites: ReplyDraft[];
+  /** Reply draft ids to remove locally. */
+  replyRemoves: string[];
   /** The new content of the sync page. */
   doc: SyncDoc;
   /** Seen-map entries that are newer on the sync page. */
@@ -45,17 +54,54 @@ export interface MergeResult {
 }
 
 export function emptySyncDoc(now: string): SyncDoc {
-  return { format: 'margin-notes-sync', schemaVersion: SCHEMA_VERSION, updatedAt: now, notes: [], purged: {}, seen: {} };
+  return { format: 'margin-notes-sync', schemaVersion: SCHEMA_VERSION, updatedAt: now, notes: [], replies: [], purged: {}, seen: {} };
 }
 
-function pick(local: Note, remote: Note): Note {
+/** What the merge needs of a synced record: notes and reply drafts. */
+interface Synced {
+  id: string;
+  updatedAt: string;
+  deleted: boolean;
+}
+
+function pick<T extends Synced>(local: T, remote: T): T {
   if (local.deleted !== remote.deleted) return local.deleted ? local : remote;
   return local.updatedAt > remote.updatedAt ? local : remote;
 }
 
-function same(a: Note | undefined, b: Note | undefined): boolean {
+function same(a: Synced | undefined, b: Synced | undefined): boolean {
   if (!a || !b) return a === b;
   return a.updatedAt === b.updatedAt && a.deleted === b.deleted;
+}
+
+/** Merges one list of records. Adds the ids it purges to `purged`. */
+function mergeRecords<T extends Synced>(local: T[], remote: T[], purged: Record<string, string>, tombstoneCutoff: string) {
+  const localById = new Map(local.map((n) => [n.id, n]));
+  const remoteById = new Map(remote.map((n) => [n.id, n]));
+  const writes: T[] = [];
+  const removes: string[] = [];
+  const merged: T[] = [];
+
+  for (const id of new Set([...localById.keys(), ...remoteById.keys()])) {
+    const l = localById.get(id);
+    const r = remoteById.get(id);
+    if (purged[id] !== undefined) {
+      if (l) removes.push(id);
+      continue;
+    }
+    const winner = l && r ? pick(l, r) : (l ?? r)!;
+    if (winner.deleted && winner.updatedAt < tombstoneCutoff) {
+      purged[id] = winner.updatedAt;
+      if (l) removes.push(id);
+      continue;
+    }
+    merged.push(winner);
+    if (!same(winner, l)) writes.push(winner);
+  }
+
+  merged.sort((a, b) => a.id.localeCompare(b.id));
+  const changed = merged.length !== remote.length || merged.some((n) => !same(n, remoteById.get(n.id)));
+  return { merged, writes, removes, changed };
 }
 
 function mergeSeen(local: Record<string, string>, remote: Record<string, string>, cutoff: string) {
@@ -73,7 +119,13 @@ function mergeSeen(local: Record<string, string>, remote: Record<string, string>
   return { seen, seenWrites };
 }
 
-export function merge(local: Note[], remote: SyncDoc, now: Date, localSeen: Record<string, string> = {}): MergeResult {
+export function merge(
+  local: Note[],
+  remote: SyncDoc,
+  now: Date,
+  localSeen: Record<string, string> = {},
+  localReplies: ReplyDraft[] = [],
+): MergeResult {
   const nowIso = now.toISOString();
   const tombstoneCutoff = new Date(now.getTime() - TOMBSTONE_TTL_MS).toISOString();
   const purgedCutoff = new Date(now.getTime() - PURGED_TTL_MS).toISOString();
@@ -81,45 +133,33 @@ export function merge(local: Note[], remote: SyncDoc, now: Date, localSeen: Reco
   const purged: Record<string, string> = {};
   for (const [id, at] of Object.entries(remote.purged ?? {})) if (at >= purgedCutoff) purged[id] = at;
 
-  const localById = new Map(local.map((n) => [n.id, n]));
-  const remoteById = new Map(remote.notes.map((n) => [n.id, n]));
-  const localWrites: Note[] = [];
-  const localRemoves: string[] = [];
-  const merged: Note[] = [];
-
-  for (const id of new Set([...localById.keys(), ...remoteById.keys()])) {
-    const l = localById.get(id);
-    const r = remoteById.get(id);
-    if (purged[id] !== undefined) {
-      if (l) localRemoves.push(id);
-      continue;
-    }
-    const winner = l && r ? pick(l, r) : (l ?? r)!;
-    if (winner.deleted && winner.updatedAt < tombstoneCutoff) {
-      purged[id] = winner.updatedAt;
-      if (l) localRemoves.push(id);
-      continue;
-    }
-    merged.push(winner);
-    if (!same(winner, l)) localWrites.push(winner);
-  }
-
-  merged.sort((a, b) => a.id.localeCompare(b.id));
+  const notes = mergeRecords(local, remote.notes, purged, tombstoneCutoff);
+  const replies = mergeRecords(localReplies, remote.replies ?? [], purged, tombstoneCutoff);
   const remoteSeen = remote.seen ?? {};
   const { seen, seenWrites } = mergeSeen(localSeen, remoteSeen, purgedCutoff);
   const sameMap = (a: Record<string, string>, b: Record<string, string>) =>
     Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([k, v]) => b[k] === v);
   const remoteChanged =
-    merged.length !== remote.notes.length ||
-    merged.some((n) => !same(n, remoteById.get(n.id))) ||
+    notes.changed ||
+    replies.changed ||
     !sameMap(purged, remote.purged ?? {}) ||
     !sameMap(seen, remoteSeen);
 
   return {
-    localWrites,
-    localRemoves,
+    localWrites: notes.writes,
+    localRemoves: notes.removes,
+    replyWrites: replies.writes,
+    replyRemoves: replies.removes,
     seenWrites,
-    doc: { format: 'margin-notes-sync', schemaVersion: SCHEMA_VERSION, updatedAt: remoteChanged ? nowIso : remote.updatedAt, notes: merged, purged, seen },
+    doc: {
+      format: 'margin-notes-sync',
+      schemaVersion: SCHEMA_VERSION,
+      updatedAt: remoteChanged ? nowIso : remote.updatedAt,
+      notes: notes.merged,
+      replies: replies.merged,
+      purged,
+      seen,
+    },
     remoteChanged,
   };
 }

@@ -130,8 +130,9 @@ export class SyncService {
         // Published notes from older versions become tombstones before they are sent.
         await this.store.graduatePublished();
         const local = await this.store.allNotes(true);
-        const expected = new Map(local.map((n) => [n.id, fingerprint(n)]));
-        const m = merge(local, remote, new Date(), await this.store.seen());
+        const localReplies = await this.store.allReplies(true);
+        const expected = new Map([...local, ...localReplies].map((n) => [n.id, fingerprint(n)]));
+        const m = merge(local, remote, new Date(), await this.store.seen(), localReplies);
         if (m.remoteChanged) {
           try {
             await this.client.updateStoragePage(config.pageId, page.title, page.version, renderSyncPage(m.doc), 'margin-notes sync');
@@ -141,7 +142,9 @@ export class SyncService {
             throw e;
           }
         }
-        const applied = await this.store.applyRemote(m.localWrites, m.localRemoves, expected);
+        const applied =
+          (await this.store.applyRemote(m.localWrites, m.localRemoves, expected)) +
+          (await this.store.applyRemoteReplies(m.replyWrites, m.replyRemoves, expected));
         await this.store.ensureComments(m.localWrites);
         await this.store.applySeen(m.seenWrites);
         // Published notes received from machines still on an older version.
